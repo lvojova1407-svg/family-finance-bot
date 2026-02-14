@@ -1,0 +1,22 @@
+"""
+КОНФИГУРАЦИЯ БОТА
+Токены загружаются из переменных окружения!
+"""
+
+import os
+
+# ========== TELEGRAM ==========
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+
+# ========== ЯНДЕКС.ДИСК ==========
+YANDEX_TOKEN = os.getenv("YANDEX_TOKEN", "")
+PUBLIC_KEY = os.getenv("PUBLIC_KEY", "")
+
+# ========== GOOGLE VISION AI ==========
+# Загружается из переменной окружения
+GOOGLE_VISION_CREDENTIALS = os.getenv("GOOGLE_VISION_CREDENTIALS", "")
+
+# ========== НАСТРОЙКИ ==========
+LOCAL_EXCEL_PATH = "budget.xlsx"
+MAX_PHOTO_SIZE_MB = 30
+VERSION = "3.0.0"
