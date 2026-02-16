@@ -15,7 +15,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import BOT_TOKEN, VERSION
 from yandex_disk import add_expense, add_income, delete_last
-from vision_assistant import vision_assistant
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,7 +48,6 @@ PAYMENT_METHODS = ["💵 Наличные", "💳 Карта Муж", "💳 Ка
 
 def get_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📸 Сфоткать чек", callback_data="photo_receipt")],
         [InlineKeyboardButton(text="💰 Расход", callback_data="expense")],
         [InlineKeyboardButton(text="💵 Доход", callback_data="income")],
         [InlineKeyboardButton(text="❌ Удалить последнее", callback_data="delete_last")]
@@ -100,26 +98,11 @@ def get_delete_keyboard():
     ])
 
 
-def get_confirmation_keyboard(total, category):
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Да, всё верно", 
-                                callback_data=f"confirm_receipt_{total:.0f}_{category}"),
-            InlineKeyboardButton(text="✏️ Другая категория", 
-                                callback_data="edit_category")
-        ],
-        [
-            InlineKeyboardButton(text="❌ Отмена", callback_data="back_main")
-        ]
-    ])
-
-
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_name = message.from_user.first_name
     await message.answer(
         f"👋 <b>Добро пожаловать, {user_name}!</b>\n\n"
-        f"📸 <b>НОВОЕ:</b> Отправьте фото чека — я сам всё распознаю!\n"
         f"👇 <b>Выберите действие:</b>",
         reply_markup=get_main_keyboard(),
         parse_mode="HTML"
@@ -131,91 +114,23 @@ async def cmd_help(message: types.Message):
     help_text = """
 <b>🤖 КАК ПОЛЬЗОВАТЬСЯ:</b>
 
-📸 <b>СФОТКАТЬ ЧЕК (5 СЕКУНД):</b>
-1. Нажмите "📸 Сфоткать чек"
-2. Отправьте фото чека
-3. Проверьте распознанное
-4. Нажмите "✅ Да"
-
-💰 <b>РАСХОД ВРУЧНУЮ (15 СЕКУНД):</b>
+💰 <b>РАСХОД ВРУЧНУЮ:</b>
 1. Нажмите "💰 Расход"
 2. Выберите категорию
 3. Выберите кто платил
 4. Выберите способ оплаты
 5. Введите сумму
 
-💵 <b>ДОХОД (10 СЕКУНД):</b>
+💵 <b>ДОХОД:</b>
 1. Нажмите "💵 Доход"
 2. Выберите источник
 3. Введите сумму
 
-❌ <b>УДАЛИТЬ ОШИБКУ (5 СЕКУНД):</b>
+❌ <b>УДАЛИТЬ ОШИБКУ:</b>
 1. Нажмите "❌ Удалить последнее"
 2. Выберите что удалить
     """
     await message.answer(help_text, parse_mode="HTML")
-
-
-@dp.message(lambda message: message.photo)
-async def handle_photo(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    await bot.send_chat_action(chat_id=user_id, action="typing")
-    
-    photo = message.photo[-1]
-    
-    status_msg = await message.answer(
-        "🔍 <b>Анализирую чек...</b>",
-        parse_mode="HTML"
-    )
-    
-    try:
-        file = await bot.get_file(photo.file_id)
-        file_path = file.file_path
-        photo_bytes = await bot.download_file(file_path)
-        photo_data = photo_bytes.getvalue()
-        
-        ai_result = await vision_assistant.recognize_receipt(photo_data)
-        
-        if not ai_result['success']:
-            await status_msg.edit_text(
-                "❌ <b>Не удалось распознать чек</b>\n\n"
-                "Попробуйте ввести вручную через кнопку 💰 Расход",
-                reply_markup=get_main_keyboard(),
-                parse_mode="HTML"
-            )
-            return
-        
-        await state.update_data(action="expense_ai", ai_data=ai_result)
-        
-        confidence_emoji = "✅" if ai_result.get('confidence', 0) > 50 else "⚠️"
-        
-        result_text = (
-            f"🧾 <b>Чек распознан!</b>\n\n"
-            f"{confidence_emoji} <b>Уверенность:</b> {ai_result.get('confidence', 0)}%\n"
-            f"🏪 <b>Магазин:</b> {ai_result.get('store', 'Не определен')}\n"
-            f"💰 <b>Сумма:</b> {ai_result.get('total', 0):,.0f} ₽\n"
-            f"📦 <b>Категория:</b> {ai_result.get('category', '📦 Другое')}\n\n"
-            f"<b>Всё верно?</b>"
-        )
-        
-        confirm_keyboard = get_confirmation_keyboard(
-            ai_result.get('total', 0), 
-            ai_result.get('category', '📦 Другое')
-        )
-        
-        await status_msg.edit_text(
-            result_text,
-            reply_markup=confirm_keyboard,
-            parse_mode="HTML"
-        )
-        
-    except Exception as e:
-        logger.error(f"Ошибка обработки фото: {e}")
-        await status_msg.edit_text(
-            "❌ <b>Произошла ошибка</b>",
-            reply_markup=get_main_keyboard(),
-            parse_mode="HTML"
-        )
 
 
 @dp.callback_query()
@@ -226,51 +141,6 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_text(
             "Выберите действие:",
             reply_markup=get_main_keyboard()
-        )
-        await callback.answer()
-    
-    elif data == "photo_receipt":
-        await callback.message.edit_text(
-            "📸 <b>Отправьте фото чека</b>\n\n"
-            "✨ <b>Советы:</b>\n"
-            "• Хорошее освещение\n"
-            "• Держите телефон ровно\n"
-            "• Чек должен быть расправлен",
-            parse_mode="HTML"
-        )
-        await callback.answer()
-    
-    elif data.startswith('confirm_receipt_'):
-        parts = data.split('_')
-        if len(parts) >= 4:
-            amount = float(parts[2])
-            category = '_'.join(parts[3:]).replace('_', ' ')
-            
-            state_data = await state.get_data()
-            ai_data = state_data.get('ai_data', {})
-            
-            result = add_expense(
-                category=category,
-                amount=amount,
-                payer="👨 Муж",
-                payment_method="💳 Карта Муж"
-            )
-            
-            await callback.message.edit_text(
-                f"{result}\n\n"
-                f"👇 <b>Выберите следующее действие:</b>",
-                reply_markup=get_main_keyboard(),
-                parse_mode="HTML"
-            )
-            
-            await state.clear()
-        await callback.answer()
-    
-    elif data == "edit_category":
-        await callback.message.edit_text(
-            "📌 <b>Выберите категорию:</b>",
-            reply_markup=get_categories_keyboard(),
-            parse_mode="HTML"
         )
         await callback.answer()
     
@@ -462,10 +332,6 @@ async def handle_unknown(message: types.Message):
 async def main():
     logger.info("=" * 50)
     logger.info(f"🚀 ЗАПУСК ФИНАНСОВОГО БОТА v{VERSION}")
-    if vision_assistant.client:
-        logger.info("✅ Google Vision: ДОСТУПЕН")
-    else:
-        logger.info("❌ Google Vision: НЕДОСТУПЕН (проверьте ключ)")
     logger.info("=" * 50)
     
     await dp.start_polling(bot)
