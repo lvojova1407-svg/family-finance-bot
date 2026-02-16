@@ -14,7 +14,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import BOT_TOKEN, VERSION
-from yandex_disk import add_expense, add_income, delete_last
+from yandex_disk import add_expense, add_income, delete_last, excel_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -193,6 +193,21 @@ async def cmd_help(message: types.Message):
 2. Выберите что удалить
     """
     await message.answer(help_text, parse_mode="HTML")
+
+
+@dp.message(Command("status"))
+async def cmd_status(message: types.Message):
+    """Проверка статуса подключения к Яндекс.Диску"""
+    status_text = f"📊 <b>Статус бота v{VERSION}</b>\n\n"
+    
+    # Проверяем подключение к Яндекс.Диску
+    if excel_manager.token:
+        status_text += "✅ Яндекс.Диск: подключен\n"
+        status_text += f"📁 Файл: {excel_manager.file_path}\n"
+    else:
+        status_text += "❌ Яндекс.Диск: НЕ подключен (проверьте токен)\n"
+    
+    await message.answer(status_text, parse_mode="HTML")
 
 
 @dp.callback_query()
@@ -413,6 +428,7 @@ async def handle_unknown(message: types.Message):
 async def main():
     logger.info("=" * 50)
     logger.info(f"🚀 ЗАПУСК ФИНАНСОВОГО БОТА v{VERSION}")
+    logger.info(f"📁 Excel файл: {EXCEL_FILE_PATH}")
     logger.info("=" * 50)
     
     await dp.start_polling(bot)
