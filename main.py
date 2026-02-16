@@ -14,7 +14,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import BOT_TOKEN, VERSION
-from yandex_disk import add_expense, add_income, delete_last, excel_manager
+from yandex_disk import add_expense, add_income, delete_last
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,11 +30,9 @@ dp = Dispatcher(storage=storage)
 class FinanceStates(StatesGroup):
     waiting_for_expense_amount = State()
     waiting_for_income_amount = State()
-    waiting_for_photo_confirmation = State()
-    waiting_for_manual_category = State()
 
 
-# Полный список всех категорий (для логики)
+# Полный список всех категорий
 ALL_CATEGORIES = [
     "🛒 Продукты", "🏠 Коммуналка", "🚗 Транспорт", "💳 Кредиты",
     "🌿 Зелень", "💊 Лекарства и лечение", "🚬 Сигареты и алко",
@@ -86,7 +84,7 @@ def get_categories_keyboard():
             ))
         keyboard.append(row)
     
-    # Добавляем кнопку "Другие категории" если есть скрытые категории
+    # Добавляем кнопку "Другие категории"
     if HIDDEN_CATEGORIES:
         keyboard.append([
             InlineKeyboardButton(
@@ -176,9 +174,9 @@ async def cmd_help(message: types.Message):
     help_text = """
 <b>🤖 КАК ПОЛЬЗОВАТЬСЯ:</b>
 
-💰 <b>РАСХОД ВРУЧНУЮ:</b>
+💰 <b>РАСХОД:</b>
 1. Нажмите "💰 Расход"
-2. Выберите категорию (основные или "Другие категории...")
+2. Выберите категорию
 3. Выберите кто платил
 4. Выберите способ оплаты
 5. Введите сумму
@@ -188,26 +186,11 @@ async def cmd_help(message: types.Message):
 2. Выберите источник
 3. Введите сумму
 
-❌ <b>УДАЛИТЬ ОШИБКУ:</b>
+❌ <b>УДАЛИТЬ:</b>
 1. Нажмите "❌ Удалить последнее"
 2. Выберите что удалить
     """
     await message.answer(help_text, parse_mode="HTML")
-
-
-@dp.message(Command("status"))
-async def cmd_status(message: types.Message):
-    """Проверка статуса подключения к Яндекс.Диску"""
-    status_text = f"📊 <b>Статус бота v{VERSION}</b>\n\n"
-    
-    # Проверяем подключение к Яндекс.Диску
-    if excel_manager.token:
-        status_text += "✅ Яндекс.Диск: подключен\n"
-        status_text += f"📁 Файл: {excel_manager.file_path}\n"
-    else:
-        status_text += "❌ Яндекс.Диск: НЕ подключен (проверьте токен)\n"
-    
-    await message.answer(status_text, parse_mode="HTML")
 
 
 @dp.callback_query()
@@ -258,7 +241,7 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
     
     elif data.startswith("cat_"):
         category = data[4:]
-        await state.update_data(action="expense", category=category)
+        await state.update_data(category=category)
         await callback.message.edit_text(
             "👤 <b>Кто платил?</b>",
             reply_markup=get_payers_keyboard(),
@@ -305,7 +288,7 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
     
     elif data.startswith("source_"):
         source = data[7:]
-        await state.update_data(action="income", source=source)
+        await state.update_data(source=source)
         await state.set_state(FinanceStates.waiting_for_income_amount)
         await callback.message.edit_text(
             "💰 <b>Введите сумму дохода</b>\n"
@@ -428,7 +411,6 @@ async def handle_unknown(message: types.Message):
 async def main():
     logger.info("=" * 50)
     logger.info(f"🚀 ЗАПУСК ФИНАНСОВОГО БОТА v{VERSION}")
-    logger.info(f"📁 Excel файл: {EXCEL_FILE_PATH}")
     logger.info("=" * 50)
     
     await dp.start_polling(bot)
