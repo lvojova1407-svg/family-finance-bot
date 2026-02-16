@@ -1,21 +1,17 @@
 """
 МОДУЛЬ РАБОТЫ С ЯНДЕКС.ДИСКОМ
-Используем pandas с фиксированными версиями
+Сохраняет все листы Excel
 """
 
 import requests
 import pandas as pd
-import numpy as np  # явно импортируем
 from datetime import datetime
 import logging
 import time
+from openpyxl import load_workbook
 from config import YANDEX_TOKEN, PUBLIC_KEY, LOCAL_EXCEL_PATH
 
 logger = logging.getLogger(__name__)
-
-# Проверяем версии
-logger.info(f"Pandas version: {pd.__version__}")
-logger.info(f"Numpy version: {np.__version__}")
 
 
 def download_from_yandex(max_retries=3):
@@ -98,40 +94,46 @@ def clean_text(text):
 
 
 def add_expense(category, amount, payer, payment_method):
-    """Добавить расход"""
+    """Добавить расход - СОХРАНЯЕТ ВСЕ ЛИСТЫ"""
     try:
         if not download_from_yandex():
             return "❌ Не удалось скачать файл"
         
-        # Пробуем прочитать файл
-        try:
-            df = pd.read_excel(LOCAL_EXCEL_PATH, sheet_name=0)  # читаем первый лист
-            logger.info(f"Прочитано {len(df)} строк")
-        except Exception as e:
-            logger.error(f"Ошибка чтения: {e}")
-            return f"❌ Ошибка чтения файла: {e}"
+        # Открываем файл с openpyxl (сохраняет все листы)
+        from openpyxl import load_workbook
+        wb = load_workbook(LOCAL_EXCEL_PATH)
         
-        # Очищаем данные
+        # Определяем лист с расходами
+        sheet_name = None
+        for name in ["Расходы", "расходы", "Лист1", "budget"]:
+            if name in wb.sheetnames:
+                sheet_name = name
+                break
+        
+        if not sheet_name:
+            sheet_name = wb.sheetnames[0]  # первый доступный лист
+        
+        ws = wb[sheet_name]
+        
+        # Очищаем от эмодзи
         category_clean = clean_text(category)
         payer_clean = clean_text(payer)
         method_clean = clean_text(payment_method)
         
-        # Создаем новую строку
-        new_row = pd.DataFrame({
-            'Дата': [get_date()],
-            'Категория': [category_clean],
-            'Подкат': [''],
-            'Сумма': [float(amount)],
-            'Кто': [payer_clean],
-            'Период': [get_period()],
-            'Способ': [method_clean]
-        })
+        # Находим следующую пустую строку
+        next_row = ws.max_row + 1
         
-        # Добавляем строку
-        df = pd.concat([df, new_row], ignore_index=True)
+        # Добавляем данные
+        ws.cell(row=next_row, column=1, value=get_date())        # Дата
+        ws.cell(row=next_row, column=2, value=category_clean)    # Категория
+        ws.cell(row=next_row, column=3, value="")                # Подкат
+        ws.cell(row=next_row, column=4, value=float(amount))     # Сумма
+        ws.cell(row=next_row, column=5, value=payer_clean)       # Кто
+        ws.cell(row=next_row, column=6, value=get_period())      # Период
+        ws.cell(row=next_row, column=7, value=method_clean)      # Способ
         
-        # Сохраняем
-        df.to_excel(LOCAL_EXCEL_PATH, index=False, engine='openpyxl')
+        # Сохраняем файл (сохраняются ВСЕ листы)
+        wb.save(LOCAL_EXCEL_PATH)
         
         if upload_to_yandex():
             return f"✅ Расход записан: {amount:,.0f} ₽, {category_clean}"
@@ -144,24 +146,40 @@ def add_expense(category, amount, payer, payment_method):
 
 
 def add_income(source, amount, payer):
-    """Добавить доход"""
+    """Добавить доход - СОХРАНЯЕТ ВСЕ ЛИСТЫ"""
     try:
         if not download_from_yandex():
             return "❌ Не удалось скачать файл"
         
-        df = pd.read_excel(LOCAL_EXCEL_PATH, sheet_name=0)
+        # Открываем файл с openpyxl
+        from openpyxl import load_workbook
+        wb = load_workbook(LOCAL_EXCEL_PATH)
+        
+        # Определяем лист с доходами
+        sheet_name = None
+        for name in ["Доходы", "доходы", "Лист1", "budget"]:
+            if name in wb.sheetnames:
+                sheet_name = name
+                break
+        
+        if not sheet_name:
+            sheet_name = wb.sheetnames[0]  # первый доступный лист
+        
+        ws = wb[sheet_name]
         
         source_clean = clean_text(source)
         
-        new_row = pd.DataFrame({
-            'Дата': [get_date()],
-            'Источник': [source_clean],
-            'Сумма': [float(amount)],
-            'Период': [get_period()]
-        })
+        # Находим следующую пустую строку
+        next_row = ws.max_row + 1
         
-        df = pd.concat([df, new_row], ignore_index=True)
-        df.to_excel(LOCAL_EXCEL_PATH, index=False, engine='openpyxl')
+        # Добавляем данные
+        ws.cell(row=next_row, column=1, value=get_date())        # Дата
+        ws.cell(row=next_row, column=2, value=source_clean)      # Источник
+        ws.cell(row=next_row, column=3, value=float(amount))     # Сумма
+        ws.cell(row=next_row, column=4, value=get_period())      # Период
+        
+        # Сохраняем файл (сохраняются ВСЕ листы)
+        wb.save(LOCAL_EXCEL_PATH)
         
         if upload_to_yandex():
             return f"✅ Доход записан: {amount:,.0f} ₽, {source_clean}"
