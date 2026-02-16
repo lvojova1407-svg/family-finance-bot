@@ -3,27 +3,6 @@
 Aiogram 3.4 | Python 3.11
 """
 
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    user_name = message.from_user.first_name
-    
-    # Проверяем доступность файла
-    from yandex_disk import download_from_yandex
-    file_available = download_from_yandex()
-    
-    if file_available:
-        status = "✅ Excel файл доступен"
-    else:
-        status = "❌ Excel файл НЕ доступен - проверьте PUBLIC_KEY"
-    
-    await message.answer(
-        f"👋 <b>Добро пожаловать, {user_name}!</b>\n\n"
-        f"{status}\n\n"
-        f"👇 <b>Выберите действие:</b>",
-        reply_markup=get_main_keyboard(),
-        parse_mode="HTML"
-    )
-
 import asyncio
 import logging
 import re
@@ -43,16 +22,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ========== ИНИЦИАЛИЗАЦИЯ ==========
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
+dp = Dispatcher(storage=storage)  # ← dp ДОЛЖЕН БЫТЬ ЗДЕСЬ, ДО ВСЕХ ДЕКОРАТОРОВ!
 
-
+# ========== СОСТОЯНИЯ FSM ==========
 class FinanceStates(StatesGroup):
     waiting_for_expense_amount = State()
     waiting_for_income_amount = State()
 
 
+# ========== ДАННЫЕ ==========
 # Полный список всех категорий
 ALL_CATEGORIES = [
     "🛒 Продукты", "🏠 Коммуналка", "🚗 Транспорт", "💳 Кредиты",
@@ -79,6 +60,7 @@ PAYERS = ["👩 Жена", "👨 Муж"]
 PAYMENT_METHODS = ["💵 Наличные", "💳 Карта Муж", "💳 Карта Жена", "📌 Другое"]
 
 
+# ========== КЛАВИАТУРЫ ==========
 def get_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💰 Расход", callback_data="expense")],
@@ -179,6 +161,7 @@ def get_delete_keyboard():
     ])
 
 
+# ========== ОБРАБОТЧИКИ ==========
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_name = message.from_user.first_name
@@ -429,6 +412,7 @@ async def handle_unknown(message: types.Message):
     )
 
 
+# ========== ЗАПУСК ==========
 async def main():
     logger.info("=" * 50)
     logger.info(f"🚀 ЗАПУСК ФИНАНСОВОГО БОТА v{VERSION}")
@@ -439,4 +423,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
