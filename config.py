@@ -1,22 +1,20 @@
 """
 КОНФИГУРАЦИЯ БОТА
-Токены загружаются из переменных окружения!
 """
 
 import os
+from dotenv import load_dotenv
 
-# ========== TELEGRAM ==========
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+load_dotenv()
 
-# ========== ЯНДЕКС.ДИСК ==========
-YANDEX_TOKEN = os.getenv("YANDEX_TOKEN", "")
-PUBLIC_KEY = os.getenv("PUBLIC_KEY", "")
+# Токен Telegram бота
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# ========== GOOGLE VISION AI ==========
-# Загружается из переменной окружения
-GOOGLE_VISION_CREDENTIALS = os.getenv("GOOGLE_VISION_CREDENTIALS", "")
+# Токен Яндекс.Диска (получить можно на https://yandex.ru/dev/disk/poligon/)
+YANDEX_DISK_TOKEN = os.getenv("YANDEX_DISK_TOKEN")
 
-# ========== НАСТРОЙКИ ==========
-LOCAL_EXCEL_PATH = "budget.xlsx"
-MAX_PHOTO_SIZE_MB = 30
-VERSION = "3.0.0"
+# Путь к Excel файлу на Яндекс.Диске
+EXCEL_FILE_PATH = "disk:/Финансы/budget.xlsx"
+
+# Версия бота
+VERSION = "2.0.0"
