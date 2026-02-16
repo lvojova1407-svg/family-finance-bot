@@ -1,6 +1,6 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-Aiogram 3.4 | Python 3.11
+Стабильная версия с обработкой конфликтов
 """
 
 import asyncio
@@ -22,19 +22,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ========== ИНИЦИАЛИЗАЦИЯ ==========
+# ========== ИНИЦИАЛИЗАЦИЯ (ПРАВИЛЬНЫЙ ПОРЯДОК) ==========
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
-dp = Dispatcher(storage=storage)  # ← dp ДОЛЖЕН БЫТЬ ЗДЕСЬ, ДО ВСЕХ ДЕКОРАТОРОВ!
+dp = Dispatcher(storage=storage)  # ← ДО всех декораторов!
 
-# ========== СОСТОЯНИЯ FSM ==========
+
 class FinanceStates(StatesGroup):
     waiting_for_expense_amount = State()
     waiting_for_income_amount = State()
 
 
-# ========== ДАННЫЕ ==========
-# Полный список всех категорий
+# Данные
 ALL_CATEGORIES = [
     "🛒 Продукты", "🏠 Коммуналка", "🚗 Транспорт", "💳 Кредиты",
     "🌿 Зелень", "💊 Лекарства и лечение", "🚬 Сигареты и алко",
@@ -42,17 +41,11 @@ ALL_CATEGORIES = [
     "🔨 Дом/ремонт", "👕 Одежда и обувь", "💇 Красота/Уход", "📦 Другое"
 ]
 
-# Приоритетные категории (в нужном порядке)
 PRIORITY_CATEGORIES = [
-    "🛒 Продукты",
-    "🚗 Транспорт", 
-    "🚬 Сигареты и алко",
-    "🏠 Коммуналка",
-    "💳 Кредиты",
-    "🎮 Развлечения и хобби"
+    "🛒 Продукты", "🚗 Транспорт", "🚬 Сигареты и алко",
+    "🏠 Коммуналка", "💳 Кредиты", "🎮 Развлечения и хобби"
 ]
 
-# Скрытые категории (остальные)
 HIDDEN_CATEGORIES = [cat for cat in ALL_CATEGORIES if cat not in PRIORITY_CATEGORIES]
 
 INCOME_SOURCES = ["💼 Зарплата (Жена)", "💼 Зарплата (Муж)", "💻 Подработка (Муж)"]
@@ -70,62 +63,31 @@ def get_main_keyboard():
 
 
 def get_categories_keyboard():
-    """Создает клавиатуру с приоритетными и скрытыми категориями"""
     keyboard = []
-    
-    # Добавляем приоритетные категории по две в ряд
     for i in range(0, len(PRIORITY_CATEGORIES), 2):
         row = []
-        row.append(InlineKeyboardButton(
-            text=PRIORITY_CATEGORIES[i], 
-            callback_data=f"cat_{PRIORITY_CATEGORIES[i]}"
-        ))
+        row.append(InlineKeyboardButton(text=PRIORITY_CATEGORIES[i], callback_data=f"cat_{PRIORITY_CATEGORIES[i]}"))
         if i + 1 < len(PRIORITY_CATEGORIES):
-            row.append(InlineKeyboardButton(
-                text=PRIORITY_CATEGORIES[i + 1], 
-                callback_data=f"cat_{PRIORITY_CATEGORIES[i + 1]}"
-            ))
+            row.append(InlineKeyboardButton(text=PRIORITY_CATEGORIES[i + 1], callback_data=f"cat_{PRIORITY_CATEGORIES[i + 1]}"))
         keyboard.append(row)
     
-    # Добавляем кнопку "Другие категории"
     if HIDDEN_CATEGORIES:
-        keyboard.append([
-            InlineKeyboardButton(
-                text="📋 Другие категории...", 
-                callback_data="show_hidden_categories"
-            )
-        ])
+        keyboard.append([InlineKeyboardButton(text="📋 Другие категории...", callback_data="show_hidden_categories")])
     
     keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_main")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def get_hidden_categories_keyboard():
-    """Создает клавиатуру со скрытыми категориями"""
     keyboard = []
-    
-    # Показываем скрытые категории по две в ряд
     for i in range(0, len(HIDDEN_CATEGORIES), 2):
         row = []
-        row.append(InlineKeyboardButton(
-            text=HIDDEN_CATEGORIES[i], 
-            callback_data=f"cat_{HIDDEN_CATEGORIES[i]}"
-        ))
+        row.append(InlineKeyboardButton(text=HIDDEN_CATEGORIES[i], callback_data=f"cat_{HIDDEN_CATEGORIES[i]}"))
         if i + 1 < len(HIDDEN_CATEGORIES):
-            row.append(InlineKeyboardButton(
-                text=HIDDEN_CATEGORIES[i + 1], 
-                callback_data=f"cat_{HIDDEN_CATEGORIES[i + 1]}"
-            ))
+            row.append(InlineKeyboardButton(text=HIDDEN_CATEGORIES[i + 1], callback_data=f"cat_{HIDDEN_CATEGORIES[i + 1]}"))
         keyboard.append(row)
     
-    # Кнопка возврата к основным категориям
-    keyboard.append([
-        InlineKeyboardButton(
-            text="🔙 Назад к основным категориям", 
-            callback_data="back_to_main_categories"
-        )
-    ])
-    
+    keyboard.append([InlineKeyboardButton(text="🔙 Назад к основным категориям", callback_data="back_to_main_categories")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
@@ -189,10 +151,6 @@ async def cmd_help(message: types.Message):
 1. Нажмите "💵 Доход"
 2. Выберите источник
 3. Введите сумму
-
-❌ <b>УДАЛИТЬ:</b>
-1. Нажмите "❌ Удалить последнее"
-2. Выберите что удалить
     """
     await message.answer(help_text, parse_mode="HTML")
 
@@ -202,136 +160,90 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
     data = callback.data
     
     if data == "back_main":
-        await callback.message.edit_text(
-            "Выберите действие:",
-            reply_markup=get_main_keyboard()
-        )
+        await callback.message.edit_text("Выберите действие:", reply_markup=get_main_keyboard())
         await callback.answer()
     
     elif data == "expense":
-        await callback.message.edit_text(
-            "📌 <b>Выберите категорию расхода:</b>\n\n"
-            "📋 <b>Основные категории:</b>",
-            reply_markup=get_categories_keyboard(),
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("📌 <b>Выберите категорию расхода:</b>", 
+                                        reply_markup=get_categories_keyboard(), parse_mode="HTML")
         await callback.answer()
     
     elif data == "show_hidden_categories":
-        await callback.message.edit_text(
-            "📌 <b>Дополнительные категории:</b>",
-            reply_markup=get_hidden_categories_keyboard(),
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("📌 <b>Дополнительные категории:</b>", 
+                                        reply_markup=get_hidden_categories_keyboard(), parse_mode="HTML")
         await callback.answer()
     
     elif data == "back_to_main_categories":
-        await callback.message.edit_text(
-            "📌 <b>Выберите категорию расхода:</b>\n\n"
-            "📋 <b>Основные категории:</b>",
-            reply_markup=get_categories_keyboard(),
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("📌 <b>Выберите категорию расхода:</b>", 
+                                        reply_markup=get_categories_keyboard(), parse_mode="HTML")
         await callback.answer()
     
     elif data == "back_to_categories":
-        await callback.message.edit_text(
-            "📌 <b>Выберите категорию расхода:</b>\n\n"
-            "📋 <b>Основные категории:</b>",
-            reply_markup=get_categories_keyboard(),
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("📌 <b>Выберите категорию расхода:</b>", 
+                                        reply_markup=get_categories_keyboard(), parse_mode="HTML")
         await callback.answer()
     
     elif data.startswith("cat_"):
         category = data[4:]
         await state.update_data(category=category)
-        await callback.message.edit_text(
-            "👤 <b>Кто платил?</b>",
-            reply_markup=get_payers_keyboard(),
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("👤 <b>Кто платил?</b>", 
+                                        reply_markup=get_payers_keyboard(), parse_mode="HTML")
         await callback.answer()
     
     elif data.startswith("payer_"):
         payer = data[6:]
         await state.update_data(payer=payer)
-        await callback.message.edit_text(
-            "💳 <b>Способ оплаты:</b>",
-            reply_markup=get_payment_methods_keyboard(),
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("💳 <b>Способ оплаты:</b>", 
+                                        reply_markup=get_payment_methods_keyboard(), parse_mode="HTML")
         await callback.answer()
     
     elif data == "back_to_payers":
-        await callback.message.edit_text(
-            "👤 <b>Кто платил?</b>",
-            reply_markup=get_payers_keyboard(),
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("👤 <b>Кто платил?</b>", 
+                                        reply_markup=get_payers_keyboard(), parse_mode="HTML")
         await callback.answer()
     
     elif data.startswith("method_"):
         method = data[7:]
         await state.update_data(method=method)
         await state.set_state(FinanceStates.waiting_for_expense_amount)
-        await callback.message.edit_text(
-            "💰 <b>Введите сумму расхода</b>\n"
-            "(только цифры, например: 1500)",
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("💰 <b>Введите сумму расхода</b>\n(только цифры, например: 1500)", 
+                                        parse_mode="HTML")
         await callback.answer()
     
     elif data == "income":
-        await callback.message.edit_text(
-            "💵 <b>Выберите источник дохода:</b>",
-            reply_markup=get_income_sources_keyboard(),
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("💵 <b>Выберите источник дохода:</b>", 
+                                        reply_markup=get_income_sources_keyboard(), parse_mode="HTML")
         await callback.answer()
     
     elif data.startswith("source_"):
         source = data[7:]
         await state.update_data(source=source)
         await state.set_state(FinanceStates.waiting_for_income_amount)
-        await callback.message.edit_text(
-            "💰 <b>Введите сумму дохода</b>\n"
-            "(только цифры, например: 50000)",
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("💰 <b>Введите сумму дохода</b>\n(только цифры, например: 50000)", 
+                                        parse_mode="HTML")
         await callback.answer()
     
     elif data == "delete_last":
-        await callback.message.edit_text(
-            "❓ <b>Что удалить?</b>",
-            reply_markup=get_delete_keyboard(),
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("❓ <b>Что удалить?</b>", 
+                                        reply_markup=get_delete_keyboard(), parse_mode="HTML")
         await callback.answer()
     
     elif data == "delete_expense":
         result = delete_last("Расходы")
         await callback.message.answer(result)
-        await callback.message.answer(
-            "Выберите действие:",
-            reply_markup=get_main_keyboard()
-        )
+        await callback.message.answer("Выберите действие:", reply_markup=get_main_keyboard())
         await callback.answer()
     
     elif data == "delete_income":
         result = delete_last("Доходы")
         await callback.message.answer(result)
-        await callback.message.answer(
-            "Выберите действие:",
-            reply_markup=get_main_keyboard()
-        )
+        await callback.message.answer("Выберите действие:", reply_markup=get_main_keyboard())
         await callback.answer()
 
 
 @dp.message(FinanceStates.waiting_for_expense_amount)
 async def process_expense_amount(message: types.Message, state: FSMContext):
     text = message.text.strip()
-    
     amount_str = re.sub(r"[^\d.,]", "", text).replace(",", ".")
     
     try:
@@ -348,26 +260,19 @@ async def process_expense_amount(message: types.Message, state: FSMContext):
     method = data.get("method")
     
     if not all([category, payer, method]):
-        await message.answer(
-            "❌ Ошибка сессии. Начните заново.",
-            reply_markup=get_main_keyboard()
-        )
+        await message.answer("❌ Ошибка сессии. Начните заново.", reply_markup=get_main_keyboard())
         await state.clear()
         return
     
     result = add_expense(category, amount, payer, method)
     await message.answer(result)
-    await message.answer(
-        "👇 Выберите следующее действие:",
-        reply_markup=get_main_keyboard()
-    )
+    await message.answer("👇 Выберите следующее действие:", reply_markup=get_main_keyboard())
     await state.clear()
 
 
 @dp.message(FinanceStates.waiting_for_income_amount)
 async def process_income_amount(message: types.Message, state: FSMContext):
     text = message.text.strip()
-    
     amount_str = re.sub(r"[^\d.,]", "", text).replace(",", ".")
     
     try:
@@ -382,41 +287,30 @@ async def process_income_amount(message: types.Message, state: FSMContext):
     source = data.get("source")
     
     if not source:
-        await message.answer(
-            "❌ Ошибка сессии. Начните заново.",
-            reply_markup=get_main_keyboard()
-        )
+        await message.answer("❌ Ошибка сессии. Начните заново.", reply_markup=get_main_keyboard())
         await state.clear()
         return
     
-    if "Муж" in source:
-        payer = "Муж"
-    else:
-        payer = "Жена"
-    
+    payer = "Муж" if "Муж" in source else "Жена"
     result = add_income(source, amount, payer)
     
     await message.answer(result)
-    await message.answer(
-        "👇 Выберите следующее действие:",
-        reply_markup=get_main_keyboard()
-    )
+    await message.answer("👇 Выберите следующее действие:", reply_markup=get_main_keyboard())
     await state.clear()
 
 
 @dp.message()
 async def handle_unknown(message: types.Message):
-    await message.answer(
-        "❓ Используйте кнопки меню 👇",
-        reply_markup=get_main_keyboard()
-    )
+    await message.answer("❓ Используйте кнопки меню 👇", reply_markup=get_main_keyboard())
 
 
-# ========== ЗАПУСК ==========
 async def main():
     logger.info("=" * 50)
     logger.info(f"🚀 ЗАПУСК ФИНАНСОВОГО БОТА v{VERSION}")
     logger.info("=" * 50)
+    
+    # Решение проблемы TelegramConflictError
+    await bot.delete_webhook(drop_pending_updates=True)
     
     await dp.start_polling(bot)
 
