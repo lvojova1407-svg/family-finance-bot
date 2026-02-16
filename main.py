@@ -3,6 +3,27 @@
 Aiogram 3.4 | Python 3.11
 """
 
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    user_name = message.from_user.first_name
+    
+    # Проверяем доступность файла
+    from yandex_disk import download_from_yandex
+    file_available = download_from_yandex()
+    
+    if file_available:
+        status = "✅ Excel файл доступен"
+    else:
+        status = "❌ Excel файл НЕ доступен - проверьте PUBLIC_KEY"
+    
+    await message.answer(
+        f"👋 <b>Добро пожаловать, {user_name}!</b>\n\n"
+        f"{status}\n\n"
+        f"👇 <b>Выберите действие:</b>",
+        reply_markup=get_main_keyboard(),
+        parse_mode="HTML"
+    )
+
 import asyncio
 import logging
 import re
@@ -418,3 +439,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
