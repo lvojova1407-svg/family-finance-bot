@@ -1,6 +1,6 @@
 """
 МОДУЛЬ РАБОТЫ С ЯНДЕКС.ДИСКОМ
-Полная версия с функцией удаления
+Полная версия с исправленной функцией удаления
 """
 
 import requests
@@ -36,6 +36,7 @@ def download_from_yandex(max_retries=3):
             logger.warning(f"Попытка {attempt + 1}/{max_retries} не удалась: {e}")
             time.sleep(2)
     
+    logger.error("❌ Не удалось скачать файл после всех попыток")
     return False
 
 
@@ -45,10 +46,12 @@ def upload_to_yandex(max_retries=3):
         try:
             headers = {"Authorization": f"OAuth {YANDEX_TOKEN}"}
             
+            # Создаем папку Финансы (если её нет)
             folder_url = "https://cloud-api.yandex.net/v1/disk/resources"
             folder_params = {"path": "/Финансы"}
             requests.put(folder_url, headers=headers, params=folder_params)
             
+            # Получаем ссылку для загрузки
             upload_url = "https://cloud-api.yandex.net/v1/disk/resources/upload"
             upload_params = {
                 "path": "/Финансы/budget.xlsx",
@@ -71,25 +74,35 @@ def upload_to_yandex(max_retries=3):
             logger.warning(f"Попытка {attempt + 1}/{max_retries} не удалась: {e}")
             time.sleep(2)
     
+    logger.error("❌ Не удалось загрузить файл после всех попыток")
     return False
 
 
 def get_period():
+    """Определить период по дню месяца"""
     day = datetime.now().day
-    if day <= 9: return "25-9"
-    elif day <= 24: return "10-24"
-    else: return "25-9"
+    if day <= 9: 
+        return "25-9"
+    elif day <= 24: 
+        return "10-24"
+    else: 
+        return "25-9"
 
 
 def get_date():
+    """Формат даты: ДД.ММ.ГГ"""
     return datetime.now().strftime("%d.%m.%y")
 
 
 def clean_text(text):
+    """Удалить эмодзи из текста"""
     if not text:
         return text
     parts = text.split(" ", 1)
-    return parts[1] if len(parts) > 1 and parts[0].startswith(('🛒', '🏠', '🚗', '💳', '🌿', '💊', '🚬', '🐱', '🧹', '🎮', '🔨', '👕', '💇', '📦')) else text
+    # Если первая часть - эмодзи, возвращаем вторую часть
+    if len(parts) > 1 and parts[0].startswith(('🛒', '🏠', '🚗', '💳', '🌿', '💊', '🚬', '🐱', '🧹', '🎮', '🔨', '👕', '💇', '📦')):
+        return parts[1]
+    return text
 
 
 def find_last_data_row(worksheet):
@@ -110,42 +123,45 @@ def add_expense(category, amount, payer, payment_method):
         
         # Ищем лист с расходами
         sheet_name = None
-        for name in ["Расходы", "расходы", "Лист1", "budget"]:
+        for name in ["Расходы", "расходы", "Лист1", "budget", "Sheet1"]:
             if name in wb.sheetnames:
                 sheet_name = name
                 break
         
         if not sheet_name:
-            sheet_name = wb.sheetnames[0]
+            sheet_name = wb.sheetnames[0]  # первый доступный лист
+            logger.info(f"Лист расходов не найден, используем: {sheet_name}")
         
         ws = wb[sheet_name]
         
+        # Очищаем от эмодзи
         category_clean = clean_text(category)
         payer_clean = clean_text(payer)
         method_clean = clean_text(payment_method)
         
-        # Находим последнюю строку
+        # Находим последнюю строку с данными
         last_row = find_last_data_row(ws)
         new_row = last_row + 1
         
         # Добавляем данные
-        ws.cell(row=new_row, column=1, value=get_date())        # Дата
-        ws.cell(row=new_row, column=2, value=category_clean)    # Категория
-        ws.cell(row=new_row, column=3, value="")                # Подкат
-        ws.cell(row=new_row, column=4, value=float(amount))     # Сумма
-        ws.cell(row=new_row, column=5, value=payer_clean)       # Кто
-        ws.cell(row=new_row, column=6, value=get_period())      # Период
-        ws.cell(row=new_row, column=7, value=method_clean)      # Способ
+        ws.cell(row=new_row, column=1, value=get_date())        # A - Дата
+        ws.cell(row=new_row, column=2, value=category_clean)    # B - Категория
+        ws.cell(row=new_row, column=3, value="")                # C - Подкат
+        ws.cell(row=new_row, column=4, value=float(amount))     # D - Сумма
+        ws.cell(row=new_row, column=5, value=payer_clean)       # E - Кто
+        ws.cell(row=new_row, column=6, value=get_period())      # F - Период
+        ws.cell(row=new_row, column=7, value=method_clean)      # G - Способ
         
+        # Сохраняем файл
         wb.save(LOCAL_EXCEL_PATH)
         
         if upload_to_yandex():
             return f"✅ Расход записан: {amount:,.0f} ₽, {category_clean}"
         else:
-            return "⚠️ Расход записан локально"
+            return "⚠️ Расход записан локально, но не загружен в облако"
             
     except Exception as e:
-        logger.error(f"Ошибка: {e}")
+        logger.error(f"Ошибка добавления расхода: {e}")
         return f"❌ Ошибка: {str(e)}"
 
 
@@ -157,27 +173,33 @@ def add_income(source, amount, payer):
         
         wb = load_workbook(LOCAL_EXCEL_PATH)
         
+        # Ищем лист с доходами
         sheet_name = None
-        for name in ["Доходы", "доходы", "Лист1", "budget"]:
+        for name in ["Доходы", "доходы", "Лист1", "budget", "Sheet1"]:
             if name in wb.sheetnames:
                 sheet_name = name
                 break
         
         if not sheet_name:
-            sheet_name = wb.sheetnames[0]
+            sheet_name = wb.sheetnames[0]  # первый доступный лист
+            logger.info(f"Лист доходов не найден, используем: {sheet_name}")
         
         ws = wb[sheet_name]
         
+        # Очищаем от эмодзи
         source_clean = clean_text(source)
         
+        # Находим последнюю строку с данными
         last_row = find_last_data_row(ws)
         new_row = last_row + 1
         
-        ws.cell(row=new_row, column=1, value=get_date())        # Дата
-        ws.cell(row=new_row, column=2, value=source_clean)      # Источник
-        ws.cell(row=new_row, column=3, value=float(amount))     # Сумма
-        ws.cell(row=new_row, column=4, value=get_period())      # Период
+        # Добавляем данные
+        ws.cell(row=new_row, column=1, value=get_date())        # A - Дата
+        ws.cell(row=new_row, column=2, value=source_clean)      # B - Источник
+        ws.cell(row=new_row, column=3, value=float(amount))     # C - Сумма
+        ws.cell(row=new_row, column=4, value=get_period())      # D - Период
         
+        # Сохраняем файл
         wb.save(LOCAL_EXCEL_PATH)
         
         if upload_to_yandex():
@@ -186,7 +208,7 @@ def add_income(source, amount, payer):
             return "⚠️ Доход записан локально"
             
     except Exception as e:
-        logger.error(f"Ошибка: {e}")
+        logger.error(f"Ошибка добавления дохода: {e}")
         return f"❌ Ошибка: {str(e)}"
 
 
@@ -203,7 +225,7 @@ def delete_last(sheet_name):
         
         # Находим лист
         target_sheet = None
-        for name in [sheet_name, sheet_name.lower(), "Лист1", "budget"]:
+        for name in [sheet_name, sheet_name.lower(), "Лист1", "budget", "Sheet1"]:
             if name in wb.sheetnames:
                 target_sheet = name
                 break
@@ -213,7 +235,7 @@ def delete_last(sheet_name):
         
         ws = wb[target_sheet]
         
-        # Находим последнюю строку с данными
+        # Находим последнюю строку с данными (не заголовок)
         last_row = find_last_data_row(ws)
         
         if last_row <= 1:
@@ -224,16 +246,24 @@ def delete_last(sheet_name):
         category = ws.cell(row=last_row, column=2).value
         amount = ws.cell(row=last_row, column=4).value
         
+        # 🔧 ИСПРАВЛЕНИЕ БАГА: преобразуем amount в число для форматирования
+        try:
+            amount_float = float(amount) if amount else 0
+        except (ValueError, TypeError):
+            amount_float = 0
+            logger.warning(f"Не удалось преобразовать сумму в число: {amount}")
+        
         # Удаляем строку
         ws.delete_rows(last_row)
         
+        # Сохраняем файл
         wb.save(LOCAL_EXCEL_PATH)
         
         if upload_to_yandex():
             if sheet_name == "Расходы":
-                return f"✅ Удалён расход: {date} | {category} | {amount:,.0f} ₽"
+                return f"✅ Удалён расход: {date} | {category} | {amount_float:,.0f} ₽"
             else:
-                return f"✅ Удалён доход: {date} | {category} | {amount:,.0f} ₽"
+                return f"✅ Удалён доход: {date} | {category} | {amount_float:,.0f} ₽"
         else:
             return "⚠️ Запись удалена локально"
             
