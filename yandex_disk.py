@@ -1,10 +1,9 @@
 """
 МОДУЛЬ РАБОТЫ С ЯНДЕКС.ДИСКОМ
-Сохраняет все листы Excel
+Полная версия с функцией удаления
 """
 
 import requests
-import pandas as pd
 from datetime import datetime
 import logging
 import time
@@ -93,17 +92,23 @@ def clean_text(text):
     return parts[1] if len(parts) > 1 and parts[0].startswith(('🛒', '🏠', '🚗', '💳', '🌿', '💊', '🚬', '🐱', '🧹', '🎮', '🔨', '👕', '💇', '📦')) else text
 
 
+def find_last_data_row(worksheet):
+    """Находит последнюю строку с данными"""
+    for row in range(worksheet.max_row, 1, -1):
+        if worksheet.cell(row=row, column=1).value:
+            return row
+    return 1
+
+
 def add_expense(category, amount, payer, payment_method):
-    """Добавить расход - СОХРАНЯЕТ ВСЕ ЛИСТЫ"""
+    """Добавить расход"""
     try:
         if not download_from_yandex():
             return "❌ Не удалось скачать файл"
         
-        # Открываем файл с openpyxl (сохраняет все листы)
-        from openpyxl import load_workbook
         wb = load_workbook(LOCAL_EXCEL_PATH)
         
-        # Определяем лист с расходами
+        # Ищем лист с расходами
         sheet_name = None
         for name in ["Расходы", "расходы", "Лист1", "budget"]:
             if name in wb.sheetnames:
@@ -111,28 +116,27 @@ def add_expense(category, amount, payer, payment_method):
                 break
         
         if not sheet_name:
-            sheet_name = wb.sheetnames[0]  # первый доступный лист
+            sheet_name = wb.sheetnames[0]
         
         ws = wb[sheet_name]
         
-        # Очищаем от эмодзи
         category_clean = clean_text(category)
         payer_clean = clean_text(payer)
         method_clean = clean_text(payment_method)
         
-        # Находим следующую пустую строку
-        next_row = ws.max_row + 1
+        # Находим последнюю строку
+        last_row = find_last_data_row(ws)
+        new_row = last_row + 1
         
         # Добавляем данные
-        ws.cell(row=next_row, column=1, value=get_date())        # Дата
-        ws.cell(row=next_row, column=2, value=category_clean)    # Категория
-        ws.cell(row=next_row, column=3, value="")                # Подкат
-        ws.cell(row=next_row, column=4, value=float(amount))     # Сумма
-        ws.cell(row=next_row, column=5, value=payer_clean)       # Кто
-        ws.cell(row=next_row, column=6, value=get_period())      # Период
-        ws.cell(row=next_row, column=7, value=method_clean)      # Способ
+        ws.cell(row=new_row, column=1, value=get_date())        # Дата
+        ws.cell(row=new_row, column=2, value=category_clean)    # Категория
+        ws.cell(row=new_row, column=3, value="")                # Подкат
+        ws.cell(row=new_row, column=4, value=float(amount))     # Сумма
+        ws.cell(row=new_row, column=5, value=payer_clean)       # Кто
+        ws.cell(row=new_row, column=6, value=get_period())      # Период
+        ws.cell(row=new_row, column=7, value=method_clean)      # Способ
         
-        # Сохраняем файл (сохраняются ВСЕ листы)
         wb.save(LOCAL_EXCEL_PATH)
         
         if upload_to_yandex():
@@ -146,16 +150,13 @@ def add_expense(category, amount, payer, payment_method):
 
 
 def add_income(source, amount, payer):
-    """Добавить доход - СОХРАНЯЕТ ВСЕ ЛИСТЫ"""
+    """Добавить доход"""
     try:
         if not download_from_yandex():
             return "❌ Не удалось скачать файл"
         
-        # Открываем файл с openpyxl
-        from openpyxl import load_workbook
         wb = load_workbook(LOCAL_EXCEL_PATH)
         
-        # Определяем лист с доходами
         sheet_name = None
         for name in ["Доходы", "доходы", "Лист1", "budget"]:
             if name in wb.sheetnames:
@@ -163,22 +164,20 @@ def add_income(source, amount, payer):
                 break
         
         if not sheet_name:
-            sheet_name = wb.sheetnames[0]  # первый доступный лист
+            sheet_name = wb.sheetnames[0]
         
         ws = wb[sheet_name]
         
         source_clean = clean_text(source)
         
-        # Находим следующую пустую строку
-        next_row = ws.max_row + 1
+        last_row = find_last_data_row(ws)
+        new_row = last_row + 1
         
-        # Добавляем данные
-        ws.cell(row=next_row, column=1, value=get_date())        # Дата
-        ws.cell(row=next_row, column=2, value=source_clean)      # Источник
-        ws.cell(row=next_row, column=3, value=float(amount))     # Сумма
-        ws.cell(row=next_row, column=4, value=get_period())      # Период
+        ws.cell(row=new_row, column=1, value=get_date())        # Дата
+        ws.cell(row=new_row, column=2, value=source_clean)      # Источник
+        ws.cell(row=new_row, column=3, value=float(amount))     # Сумма
+        ws.cell(row=new_row, column=4, value=get_period())      # Период
         
-        # Сохраняем файл (сохраняются ВСЕ листы)
         wb.save(LOCAL_EXCEL_PATH)
         
         if upload_to_yandex():
@@ -192,4 +191,52 @@ def add_income(source, amount, payer):
 
 
 def delete_last(sheet_name):
-    return "⚠️ Функция удаления временно отключена"
+    """
+    Удалить последнюю запись из указанного листа
+    sheet_name: "Расходы" или "Доходы"
+    """
+    try:
+        if not download_from_yandex():
+            return "❌ Не удалось скачать файл"
+        
+        wb = load_workbook(LOCAL_EXCEL_PATH)
+        
+        # Находим лист
+        target_sheet = None
+        for name in [sheet_name, sheet_name.lower(), "Лист1", "budget"]:
+            if name in wb.sheetnames:
+                target_sheet = name
+                break
+        
+        if not target_sheet:
+            return f"❌ Лист {sheet_name} не найден"
+        
+        ws = wb[target_sheet]
+        
+        # Находим последнюю строку с данными
+        last_row = find_last_data_row(ws)
+        
+        if last_row <= 1:
+            return "❌ Нет записей для удаления"
+        
+        # Сохраняем данные для сообщения
+        date = ws.cell(row=last_row, column=1).value
+        category = ws.cell(row=last_row, column=2).value
+        amount = ws.cell(row=last_row, column=4).value
+        
+        # Удаляем строку
+        ws.delete_rows(last_row)
+        
+        wb.save(LOCAL_EXCEL_PATH)
+        
+        if upload_to_yandex():
+            if sheet_name == "Расходы":
+                return f"✅ Удалён расход: {date} | {category} | {amount:,.0f} ₽"
+            else:
+                return f"✅ Удалён доход: {date} | {category} | {amount:,.0f} ₽"
+        else:
+            return "⚠️ Запись удалена локально"
+            
+    except Exception as e:
+        logger.error(f"Ошибка удаления: {e}")
+        return f"❌ Ошибка удаления: {str(e)}"
