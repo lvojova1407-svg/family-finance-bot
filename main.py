@@ -34,12 +34,26 @@ class FinanceStates(StatesGroup):
     waiting_for_manual_category = State()
 
 
-CATEGORIES = [
+# Полный список всех категорий (для логики)
+ALL_CATEGORIES = [
     "🛒 Продукты", "🏠 Коммуналка", "🚗 Транспорт", "💳 Кредиты",
     "🌿 Зелень", "💊 Лекарства и лечение", "🚬 Сигареты и алко",
     "🐱 Кошка", "🧹 Быт расходники", "🎮 Развлечения и хобби",
     "🔨 Дом/ремонт", "👕 Одежда и обувь", "💇 Красота/Уход", "📦 Другое"
 ]
+
+# Приоритетные категории (в нужном порядке)
+PRIORITY_CATEGORIES = [
+    "🛒 Продукты",
+    "🚗 Транспорт", 
+    "🚬 Сигареты и алко",
+    "🏠 Коммуналка",
+    "💳 Кредиты",
+    "🎮 Развлечения и хобби"
+]
+
+# Скрытые категории (остальные)
+HIDDEN_CATEGORIES = [cat for cat in ALL_CATEGORIES if cat not in PRIORITY_CATEGORIES]
 
 INCOME_SOURCES = ["💼 Зарплата (Жена)", "💼 Зарплата (Муж)", "💻 Подработка (Муж)"]
 PAYERS = ["👩 Жена", "👨 Муж"]
@@ -55,14 +69,62 @@ def get_main_keyboard():
 
 
 def get_categories_keyboard():
+    """Создает клавиатуру с приоритетными и скрытыми категориями"""
     keyboard = []
-    for i in range(0, len(CATEGORIES), 2):
+    
+    # Добавляем приоритетные категории по две в ряд
+    for i in range(0, len(PRIORITY_CATEGORIES), 2):
         row = []
-        row.append(InlineKeyboardButton(text=CATEGORIES[i], callback_data=f"cat_{CATEGORIES[i]}"))
-        if i + 1 < len(CATEGORIES):
-            row.append(InlineKeyboardButton(text=CATEGORIES[i + 1], callback_data=f"cat_{CATEGORIES[i + 1]}"))
+        row.append(InlineKeyboardButton(
+            text=PRIORITY_CATEGORIES[i], 
+            callback_data=f"cat_{PRIORITY_CATEGORIES[i]}"
+        ))
+        if i + 1 < len(PRIORITY_CATEGORIES):
+            row.append(InlineKeyboardButton(
+                text=PRIORITY_CATEGORIES[i + 1], 
+                callback_data=f"cat_{PRIORITY_CATEGORIES[i + 1]}"
+            ))
         keyboard.append(row)
+    
+    # Добавляем кнопку "Другие категории" если есть скрытые категории
+    if HIDDEN_CATEGORIES:
+        keyboard.append([
+            InlineKeyboardButton(
+                text="📋 Другие категории...", 
+                callback_data="show_hidden_categories"
+            )
+        ])
+    
     keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_main")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_hidden_categories_keyboard():
+    """Создает клавиатуру со скрытыми категориями"""
+    keyboard = []
+    
+    # Показываем скрытые категории по две в ряд
+    for i in range(0, len(HIDDEN_CATEGORIES), 2):
+        row = []
+        row.append(InlineKeyboardButton(
+            text=HIDDEN_CATEGORIES[i], 
+            callback_data=f"cat_{HIDDEN_CATEGORIES[i]}"
+        ))
+        if i + 1 < len(HIDDEN_CATEGORIES):
+            row.append(InlineKeyboardButton(
+                text=HIDDEN_CATEGORIES[i + 1], 
+                callback_data=f"cat_{HIDDEN_CATEGORIES[i + 1]}"
+            ))
+        keyboard.append(row)
+    
+    # Кнопка возврата к основным категориям
+    keyboard.append([
+        InlineKeyboardButton(
+            text="🔙 Назад к основным категориям", 
+            callback_data="back_to_main_categories"
+        )
+    ])
+    
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
@@ -116,7 +178,7 @@ async def cmd_help(message: types.Message):
 
 💰 <b>РАСХОД ВРУЧНУЮ:</b>
 1. Нажмите "💰 Расход"
-2. Выберите категорию
+2. Выберите категорию (основные или "Другие категории...")
 3. Выберите кто платил
 4. Выберите способ оплаты
 5. Введите сумму
@@ -146,7 +208,25 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
     
     elif data == "expense":
         await callback.message.edit_text(
-            "📌 <b>Выберите категорию расхода:</b>",
+            "📌 <b>Выберите категорию расхода:</b>\n\n"
+            "📋 <b>Основные категории:</b>",
+            reply_markup=get_categories_keyboard(),
+            parse_mode="HTML"
+        )
+        await callback.answer()
+    
+    elif data == "show_hidden_categories":
+        await callback.message.edit_text(
+            "📌 <b>Дополнительные категории:</b>",
+            reply_markup=get_hidden_categories_keyboard(),
+            parse_mode="HTML"
+        )
+        await callback.answer()
+    
+    elif data == "back_to_main_categories":
+        await callback.message.edit_text(
+            "📌 <b>Выберите категорию расхода:</b>\n\n"
+            "📋 <b>Основные категории:</b>",
             reply_markup=get_categories_keyboard(),
             parse_mode="HTML"
         )
@@ -154,7 +234,8 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
     
     elif data == "back_to_categories":
         await callback.message.edit_text(
-            "📌 <b>Выберите категорию расхода:</b>",
+            "📌 <b>Выберите категорию расхода:</b>\n\n"
+            "📋 <b>Основные категории:</b>",
             reply_markup=get_categories_keyboard(),
             parse_mode="HTML"
         )
