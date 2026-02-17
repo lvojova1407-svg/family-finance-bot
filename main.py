@@ -6,6 +6,7 @@
 import asyncio
 import logging
 import re
+import time  # ← ДОБАВЛЕНО!
 from datetime import datetime, timezone, timedelta
 
 from aiogram import Bot, Dispatcher, types
@@ -569,6 +570,7 @@ def run_fastapi():
 
 if __name__ == "__main__":
     import threading
+    # time уже импортирован в начале файла!
     
     # FastAPI может работать в отдельном потоке
     fastapi_thread = threading.Thread(target=run_fastapi, daemon=True)
