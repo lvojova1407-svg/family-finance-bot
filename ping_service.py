@@ -1,6 +1,6 @@
 """
 ПРОСТОЙ АВТО-ПИНГ ДЛЯ RENDER
-Пинг каждые 5 минут
+Пинг каждые 5 минут - ИСПРАВЛЕННАЯ ВЕРСИЯ
 """
 
 import threading
@@ -12,17 +12,13 @@ from config import RENDER_URL, PING_INTERVAL
 logger = logging.getLogger(__name__)
 
 class PingService:
-    """Сервис автоматического пинга каждые 5 минут"""
-    
     def __init__(self):
         self.running = False
         self.thread = None
         self.ping_count = 0
     
     def start(self):
-        """Запускает сервис пинга"""
         if self.running:
-            logger.warning("⚠️ Пинг уже запущен")
             return
         
         self.running = True
@@ -30,17 +26,11 @@ class PingService:
         self.thread.start()
         logger.info(f"✅ Автопинг запущен (интервал: {PING_INTERVAL}с / 5 минут)")
     
-    def stop(self):
-        """Останавливает сервис пинга"""
-        self.running = False
-        logger.info("🛑 Автопинг остановлен")
-    
     def _ping_worker(self):
         """Рабочий поток"""
-        # Даем время на полный запуск бота
         time.sleep(30)
         
-        # Убираем лишний слеш в URL
+        # Используем ТОЛЬКО корневой URL (без /ping, без /health)
         base_url = RENDER_URL.rstrip('/')
         
         logger.info(f"🧵 Поток пинга запущен для {base_url}")
@@ -48,29 +38,22 @@ class PingService:
         while self.running:
             self.ping_count += 1
             
-            # Пингуем корневой эндпоинт
             try:
-                url = f"{base_url}/"
-                response = requests.get(url, timeout=10)
+                # Пингуем ТОЛЬКО корневой URL (он точно работает)
+                response = requests.get(base_url, timeout=10)
                 
-                if response.status_code == 200:
-                    logger.info(f"✅ Пинг #{self.ping_count} - успешно (200)")
+                # 200 - успех, 405 - тоже успех (главное что сервер ответил)
+                if response.status_code in [200, 405]:
+                    logger.info(f"✅ Пинг #{self.ping_count} - сервер ответил ({response.status_code})")
                 else:
                     logger.warning(f"⚠️ Пинг #{self.ping_count} - код {response.status_code}")
                     
-            except requests.exceptions.ConnectionError:
-                logger.warning(f"⚠️ Пинг #{self.ping_count} - сервер еще не готов")
-            except requests.exceptions.Timeout:
-                logger.warning(f"⚠️ Пинг #{self.ping_count} - таймаут")
             except Exception as e:
                 logger.error(f"❌ Пинг #{self.ping_count} - ошибка: {e}")
             
-            # Ждем следующий пинг (5 минут)
-            for _ in range(PING_INTERVAL):
-                if not self.running:
-                    break
-                time.sleep(1)
+            # Ждем ровно 5 минут
+            time.sleep(PING_INTERVAL)
 
 
-# Глобальный экземпляр сервиса пинга
+# Глобальный экземпляр
 ping_service = PingService()
