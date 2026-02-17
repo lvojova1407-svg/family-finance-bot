@@ -1,12 +1,12 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-С автопингом каждые 5 минут - ИСПРАВЛЕННАЯ ВЕРСИЯ
+С автопингом каждые 5 минут - СТАБИЛЬНАЯ ВЕРСИЯ
 """
 
 import asyncio
 import logging
 import re
-import time  # ← ДОБАВЛЕНО!
+import time
 from datetime import datetime, timezone, timedelta
 
 from aiogram import Bot, Dispatcher, types
@@ -34,15 +34,8 @@ bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
-# Проверяем подключение к боту
-try:
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(bot.get_me())
-    loop.close()
-    logger.info("✅ Подключение к Telegram API успешно")
-except Exception as e:
-    logger.warning(f"⚠️ Ошибка при проверке бота: {e}")
+# Простая инициализация без проверок, которые ломают event loop
+logger.info("✅ Бот инициализирован")
 
 
 class FinanceStates(StatesGroup):
@@ -570,7 +563,6 @@ def run_fastapi():
 
 if __name__ == "__main__":
     import threading
-    # time уже импортирован в начале файла!
     
     # FastAPI может работать в отдельном потоке
     fastapi_thread = threading.Thread(target=run_fastapi, daemon=True)
