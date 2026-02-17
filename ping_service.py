@@ -1,6 +1,6 @@
 """
 ПРОСТОЙ АВТО-ПИНГ ДЛЯ RENDER
-Пинг каждые 5 минут - ИСПРАВЛЕННАЯ ВЕРСИЯ
+С задержкой перед первым пингом
 """
 
 import threading
@@ -28,30 +28,32 @@ class PingService:
     
     def _ping_worker(self):
         """Рабочий поток"""
-        time.sleep(30)
+        # Даем серверу время полностью запуститься
+        logger.info("⏳ Ожидание 60 секунд перед первым пингом...")
+        time.sleep(60)
         
-        # Используем ТОЛЬКО корневой URL (без /ping, без /health)
         base_url = RENDER_URL.rstrip('/')
-        
         logger.info(f"🧵 Поток пинга запущен для {base_url}")
         
         while self.running:
             self.ping_count += 1
             
             try:
-                # Пингуем ТОЛЬКО корневой URL (он точно работает)
-                response = requests.get(base_url, timeout=10)
+                # Увеличиваем таймаут до 30 секунд
+                response = requests.get(base_url, timeout=30)
                 
-                # 200 - успех, 405 - тоже успех (главное что сервер ответил)
-                if response.status_code in [200, 405]:
-                    logger.info(f"✅ Пинг #{self.ping_count} - сервер ответил ({response.status_code})")
+                if response.status_code == 200:
+                    logger.info(f"✅ Пинг #{self.ping_count} - успешно (200)")
                 else:
-                    logger.warning(f"⚠️ Пинг #{self.ping_count} - код {response.status_code}")
+                    logger.info(f"✅ Пинг #{self.ping_count} - сервер ответил ({response.status_code})")
                     
+            except requests.exceptions.Timeout:
+                logger.warning(f"⚠️ Пинг #{self.ping_count} - таймаут, но сервер возможно загружен")
+                # Не считаем это критической ошибкой
             except Exception as e:
                 logger.error(f"❌ Пинг #{self.ping_count} - ошибка: {e}")
             
-            # Ждем ровно 5 минут
+            # Ждем следующий пинг
             time.sleep(PING_INTERVAL)
 
 
