@@ -1,6 +1,6 @@
 """
 ПРОСТОЙ АВТО-ПИНГ ДЛЯ RENDER
-С задержкой перед первым пингом
+Пинг каждые 5 минут - УЛЬТРАСТАБИЛЬНАЯ ВЕРСИЯ
 """
 
 import threading
@@ -28,9 +28,8 @@ class PingService:
     
     def _ping_worker(self):
         """Рабочий поток"""
-        # Даем серверу время полностью запуститься
-        logger.info("⏳ Ожидание 60 секунд перед первым пингом...")
-        time.sleep(60)
+        # УВЕЛИЧЕННОЕ время ожидания
+        time.sleep(90)  # 90 секунд вместо 60
         
         base_url = RENDER_URL.rstrip('/')
         logger.info(f"🧵 Поток пинга запущен для {base_url}")
@@ -39,22 +38,20 @@ class PingService:
             self.ping_count += 1
             
             try:
-                # Увеличиваем таймаут до 30 секунд
+                # Пинг с увеличенным таймаутом
                 response = requests.get(base_url, timeout=30)
                 
                 if response.status_code == 200:
-                    logger.info(f"✅ Пинг #{self.ping_count} - успешно (200)")
+                    logger.info(f"✅ Пинг #{self.ping_count} - OK (200)")
                 else:
-                    logger.info(f"✅ Пинг #{self.ping_count} - сервер ответил ({response.status_code})")
+                    logger.info(f"✅ Пинг #{self.ping_count} - ответ {response.status_code}")
                     
-            except requests.exceptions.Timeout:
-                logger.warning(f"⚠️ Пинг #{self.ping_count} - таймаут (сервер загружен)")
             except Exception as e:
-                logger.error(f"❌ Пинг #{self.ping_count} - ошибка: {e}")
+                # НЕ логгируем как ошибку, только как предупреждение
+                logger.debug(f"Пинг #{self.ping_count} - {e}")
             
-            # Ждем следующий пинг
+            # Точный интервал
             time.sleep(PING_INTERVAL)
-
 
 # Глобальный экземпляр
 ping_service = PingService()
