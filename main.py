@@ -1,12 +1,11 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-С поддержкой авто-пинга для Render
+С автопингом каждые 5 минут
 """
 
 import asyncio
 import logging
 import re
-import threading
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher, types
@@ -65,7 +64,7 @@ def get_moscow_time() -> str:
     """Получить текущее время по Москве"""
     from datetime import timezone, timedelta
     moscow_tz = timezone(timedelta(hours=3))
-    return datetime.now(moscow_tz).strftime("%H:%M")
+    return datetime.now(moscow_tz).strftime("%H:%M:%S")
 
 
 # ========== КЛАВИАТУРЫ ==========
@@ -158,30 +157,19 @@ def get_delete_keyboard():
     ])
 
 
-# ========== FASTAPI ДЛЯ HEALTH CHECK ==========
+# ========== FASTAPI ДЛЯ ПИНГА ==========
 app = FastAPI(title="Family Finance Bot")
 
 @app.get("/")
-async def root():
-    return {
-        "status": "running",
-        "bot": "active",
-        "version": VERSION,
-        "time": get_moscow_time()
-    }
-
 @app.get("/health")
-async def health_check():
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "bot_running": True,
-        "version": VERSION
-    }
-
 @app.get("/ping")
-async def ping():
-    return {"ping": "pong", "time": get_moscow_time()}
+async def ping_endpoint():
+    """Универсальный эндпоинт для пинга"""
+    return {
+        "status": "alive",
+        "time": get_moscow_time(),
+        "bot": "running"
+    }
 
 
 # ========== ОБРАБОТЧИКИ КОМАНД ==========
@@ -231,6 +219,12 @@ async def cmd_stats(message: types.Message):
         reply_markup=get_stats_keyboard(),
         parse_mode="HTML"
     )
+
+
+@dp.message(Command("ping"))
+async def cmd_ping(message: types.Message):
+    """Ручная проверка пинга"""
+    await message.answer(f"🏓 Pong! Время: {get_moscow_time()}")
 
 
 # ========== ОБРАБОТЧИКИ КОЛЛБЭКОВ ==========
@@ -547,22 +541,22 @@ async def main():
     
     await bot.delete_webhook(drop_pending_updates=True)
     
-    # Запускаем сервис пинга
+    # Запускаем автопинг
     ping_service.start()
     
     await dp.start_polling(bot)
 
 
-def run_bot():
-    """Запуск бота в отдельном потоке"""
-    asyncio.run(main())
-
-
 if __name__ == "__main__":
+    import threading
+    
+    def run_bot():
+        asyncio.run(main())
+    
     # Запускаем бота в фоновом потоке
     bot_thread = threading.Thread(target=run_bot, daemon=True)
     bot_thread.start()
     
-    # Запускаем FastAPI сервер для health checks
+    # Запускаем FastAPI сервер в главном потоке
     logger.info(f"🌍 Запуск FastAPI сервера на порту {PORT}")
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
