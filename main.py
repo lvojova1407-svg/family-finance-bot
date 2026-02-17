@@ -1,6 +1,6 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-С автопингом каждые 5 минут
+С автопингом каждые 5 минут - ИСПРАВЛЕННАЯ ВЕРСИЯ
 """
 
 import asyncio
@@ -32,6 +32,16 @@ logger = logging.getLogger(__name__)
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
+
+# Проверяем подключение к боту
+try:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(bot.get_me())
+    loop.close()
+    logger.info("✅ Подключение к Telegram API успешно")
+except Exception as e:
+    logger.warning(f"⚠️ Ошибка при проверке бота: {e}")
 
 
 class FinanceStates(StatesGroup):
@@ -537,11 +547,17 @@ async def main():
     logger.info(f"🚀 ЗАПУСК ФИНАНСОВОГО БОТА v{VERSION}")
     logger.info("=" * 50)
     
+    # Принудительно удаляем вебхук
     await bot.delete_webhook(drop_pending_updates=True)
+    logger.info("✅ Вебхук удален")
+    
+    # Небольшая пауза для стабильности
+    await asyncio.sleep(2)
     
     # Запускаем автопинг
     ping_service.start()
     
+    # Запускаем поллинг
     await dp.start_polling(bot)
 
 
@@ -557,6 +573,9 @@ if __name__ == "__main__":
     # FastAPI может работать в отдельном потоке
     fastapi_thread = threading.Thread(target=run_fastapi, daemon=True)
     fastapi_thread.start()
+    
+    # Даем FastAPI время запуститься
+    time.sleep(2)
     
     # Бот ДОЛЖЕН быть в главном потоке!
     asyncio.run(main())
