@@ -48,8 +48,7 @@ class PingService:
                     logger.info(f"✅ Пинг #{self.ping_count} - сервер ответил ({response.status_code})")
                     
             except requests.exceptions.Timeout:
-                logger.warning(f"⚠️ Пинг #{self.ping_count} - таймаут, но сервер возможно загружен")
-                # Не считаем это критической ошибкой
+                logger.warning(f"⚠️ Пинг #{self.ping_count} - таймаут (сервер загружен)")
             except Exception as e:
                 logger.error(f"❌ Пинг #{self.ping_count} - ошибка: {e}")
             
