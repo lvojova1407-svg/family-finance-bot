@@ -1,25 +1,27 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-С дополнительным меню для статистики
+С поддержкой авто-пинга для Render
 """
 
 import asyncio
 import logging
 import re
-import os
-import tempfile
+import threading
+from datetime import datetime
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from config import BOT_TOKEN, VERSION
-from yandex_disk import (
-    add_expense, add_income, delete_last, 
-    download_from_yandex, get_statistics, LOCAL_EXCEL_PATH
-)
+from fastapi import FastAPI
+import uvicorn
+
+from config import BOT_TOKEN, VERSION, PORT, RENDER_URL
+from yandex_disk import add_expense, add_income, delete_last, download_from_yandex
+from ping_service import ping_service
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,7 +29,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ========== ИНИЦИАЛИЗАЦИЯ ==========
+# ========== ИНИЦИАЛИЗАЦИЯ БОТА ==========
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
@@ -58,10 +60,16 @@ PAYERS = ["👩 Жена", "👨 Муж"]
 PAYMENT_METHODS = ["💵 Наличные", "💳 Карта Муж", "💳 Карта Жена", "📌 Другое"]
 
 
-# ========== КЛАВИАТУРЫ ==========
+# ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
+def get_moscow_time() -> str:
+    """Получить текущее время по Москве"""
+    from datetime import timezone, timedelta
+    moscow_tz = timezone(timedelta(hours=3))
+    return datetime.now(moscow_tz).strftime("%H:%M")
 
+
+# ========== КЛАВИАТУРЫ ==========
 def get_main_keyboard():
-    """Главное меню"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💰 Расход", callback_data="expense")],
         [InlineKeyboardButton(text="💵 Доход", callback_data="income")],
@@ -71,7 +79,6 @@ def get_main_keyboard():
 
 
 def get_stats_keyboard():
-    """Меню статистики и файлов"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📥 Скачать Excel файл", callback_data="download_excel")],
         [InlineKeyboardButton(text="📈 Статистика за период", callback_data="stats_period")],
@@ -82,7 +89,6 @@ def get_stats_keyboard():
 
 
 def get_period_keyboard():
-    """Выбор периода для статистики"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📅 Текущий период (10-24)", callback_data="period_current")],
         [InlineKeyboardButton(text="📅 Предыдущий период (25-9)", callback_data="period_previous")],
@@ -92,9 +98,7 @@ def get_period_keyboard():
 
 
 def get_categories_keyboard():
-    """Клавиатура категорий расходов"""
     keyboard = []
-    
     for i in range(0, len(PRIORITY_CATEGORIES), 2):
         row = []
         row.append(InlineKeyboardButton(text=PRIORITY_CATEGORIES[i], callback_data=f"cat_{PRIORITY_CATEGORIES[i]}"))
@@ -110,9 +114,7 @@ def get_categories_keyboard():
 
 
 def get_hidden_categories_keyboard():
-    """Клавиатура скрытых категорий"""
     keyboard = []
-    
     for i in range(0, len(HIDDEN_CATEGORIES), 2):
         row = []
         row.append(InlineKeyboardButton(text=HIDDEN_CATEGORIES[i], callback_data=f"cat_{HIDDEN_CATEGORIES[i]}"))
@@ -156,8 +158,33 @@ def get_delete_keyboard():
     ])
 
 
-# ========== ОБРАБОТЧИКИ КОМАНД ==========
+# ========== FASTAPI ДЛЯ HEALTH CHECK ==========
+app = FastAPI(title="Family Finance Bot")
 
+@app.get("/")
+async def root():
+    return {
+        "status": "running",
+        "bot": "active",
+        "version": VERSION,
+        "time": get_moscow_time()
+    }
+
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "bot_running": True,
+        "version": VERSION
+    }
+
+@app.get("/ping")
+async def ping():
+    return {"ping": "pong", "time": get_moscow_time()}
+
+
+# ========== ОБРАБОТЧИКИ КОМАНД ==========
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_name = message.from_user.first_name
@@ -199,7 +226,6 @@ async def cmd_help(message: types.Message):
 
 @dp.message(Command("stats"))
 async def cmd_stats(message: types.Message):
-    """Быстрый переход к статистике"""
     await message.answer(
         "📊 <b>Меню статистики и файлов:</b>",
         reply_markup=get_stats_keyboard(),
@@ -208,12 +234,10 @@ async def cmd_stats(message: types.Message):
 
 
 # ========== ОБРАБОТЧИКИ КОЛЛБЭКОВ ==========
-
 @dp.callback_query()
 async def process_callback(callback: types.CallbackQuery, state: FSMContext):
     data = callback.data
     
-    # ===== ГЛАВНОЕ МЕНЮ =====
     if data == "back_main":
         await callback.message.edit_text(
             "Выберите действие:",
@@ -223,20 +247,18 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
     
     elif data == "stats_menu":
         await callback.message.edit_text(
-            "📊 <b>Меню статистики и файлов:</b>\n\n"
-            "Выберите нужный пункт:",
+            "📊 <b>Меню статистики и файлов:</b>\n\nВыберите нужный пункт:",
             reply_markup=get_stats_keyboard(),
             parse_mode="HTML"
         )
         await callback.answer()
     
-    # ===== СТАТИСТИКА И ФАЙЛЫ =====
     elif data == "download_excel":
         await callback.message.edit_text("⏬ Скачиваю файл с Яндекс.Диска...")
         
-        # Скачиваем файл
         if download_from_yandex():
-            # Отправляем файл пользователю
+            from aiogram.types import FSInputFile
+            from config import LOCAL_EXCEL_PATH
             try:
                 file_to_send = FSInputFile(LOCAL_EXCEL_PATH)
                 await callback.message.answer_document(
@@ -270,10 +292,8 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
     
     elif data == "stats_categories":
         await callback.message.edit_text("⏳ Считаю расходы по категориям...")
-        
-        # Получаем статистику
+        from yandex_disk import get_statistics
         stats_text = get_statistics(by_categories=True)
-        
         await callback.message.edit_text(
             f"📊 <b>Расходы по категориям:</b>\n\n{stats_text}",
             reply_markup=get_stats_keyboard(),
@@ -283,10 +303,8 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
     
     elif data == "stats_balance":
         await callback.message.edit_text("⏳ Считаю баланс...")
-        
-        # Получаем баланс
+        from yandex_disk import get_statistics
         balance_text = get_statistics(balance=True)
-        
         await callback.message.edit_text(
             f"💰 <b>Текущий баланс:</b>\n\n{balance_text}",
             reply_markup=get_stats_keyboard(),
@@ -296,10 +314,8 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
     
     elif data == "period_current":
         await callback.message.edit_text("⏳ Считаю статистику за текущий период...")
-        
-        # Получаем статистику за текущий период
+        from yandex_disk import get_statistics
         stats_text = get_statistics(period="current")
-        
         await callback.message.edit_text(
             f"📊 <b>Статистика за текущий период (10-24):</b>\n\n{stats_text}",
             reply_markup=get_stats_keyboard(),
@@ -309,9 +325,8 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
     
     elif data == "period_previous":
         await callback.message.edit_text("⏳ Считаю статистику за предыдущий период...")
-        
+        from yandex_disk import get_statistics
         stats_text = get_statistics(period="previous")
-        
         await callback.message.edit_text(
             f"📊 <b>Статистика за предыдущий период (25-9):</b>\n\n{stats_text}",
             reply_markup=get_stats_keyboard(),
@@ -321,9 +336,8 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
     
     elif data == "period_all":
         await callback.message.edit_text("⏳ Считаю статистику за всё время...")
-        
+        from yandex_disk import get_statistics
         stats_text = get_statistics(period="all")
-        
         await callback.message.edit_text(
             f"📊 <b>Статистика за всё время:</b>\n\n{stats_text}",
             reply_markup=get_stats_keyboard(),
@@ -331,7 +345,6 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
         )
         await callback.answer()
     
-    # ===== РАСХОДЫ =====
     elif data == "expense":
         await callback.message.edit_text(
             "📌 <b>Выберите категорию расхода:</b>",
@@ -402,7 +415,6 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
         )
         await callback.answer()
     
-    # ===== ДОХОДЫ =====
     elif data == "income":
         await callback.message.edit_text(
             "💵 <b>Выберите источник дохода:</b>",
@@ -421,7 +433,6 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
         )
         await callback.answer()
     
-    # ===== УДАЛЕНИЕ =====
     elif data == "delete_last":
         await callback.message.edit_text(
             "❓ <b>Что удалить?</b>",
@@ -450,11 +461,9 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
 
 
 # ========== ОБРАБОТЧИКИ СООБЩЕНИЙ ==========
-
 @dp.message(FinanceStates.waiting_for_expense_amount)
 async def process_expense_amount(message: types.Message, state: FSMContext):
     text = message.text.strip()
-    
     amount_str = re.sub(r"[^\d.,]", "", text).replace(",", ".")
     
     try:
@@ -490,7 +499,6 @@ async def process_expense_amount(message: types.Message, state: FSMContext):
 @dp.message(FinanceStates.waiting_for_income_amount)
 async def process_income_amount(message: types.Message, state: FSMContext):
     text = message.text.strip()
-    
     amount_str = re.sub(r"[^\d.,]", "", text).replace(",", ".")
     
     try:
@@ -531,14 +539,30 @@ async def handle_unknown(message: types.Message):
     )
 
 
+# ========== ЗАПУСК БОТА ==========
 async def main():
     logger.info("=" * 50)
     logger.info(f"🚀 ЗАПУСК ФИНАНСОВОГО БОТА v{VERSION}")
     logger.info("=" * 50)
     
     await bot.delete_webhook(drop_pending_updates=True)
+    
+    # Запускаем сервис пинга
+    ping_service.start()
+    
     await dp.start_polling(bot)
 
 
-if __name__ == "__main__":
+def run_bot():
+    """Запуск бота в отдельном потоке"""
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    # Запускаем бота в фоновом потоке
+    bot_thread = threading.Thread(target=run_bot, daemon=True)
+    bot_thread.start()
+    
+    # Запускаем FastAPI сервер для health checks
+    logger.info(f"🌍 Запуск FastAPI сервера на порту {PORT}")
+    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
