@@ -34,7 +34,6 @@ bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
-# Простая инициализация без проверок, которые ломают event loop
 logger.info("✅ Бот инициализирован")
 
 
@@ -535,39 +534,29 @@ async def handle_unknown(message: types.Message):
     )
 
 
+# ========== ЗАПУСК БОТА ==========
 async def main():
     logger.info("=" * 50)
     logger.info(f"🚀 ЗАПУСК ФИНАНСОВОГО БОТА v{VERSION}")
     logger.info("=" * 50)
     
-    # ПРИНУДИТЕЛЬНАЯ ОЧИСТКА
+    # Просто удаляем вебхук, без лишних действий
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         logger.info("✅ Вебхук удален")
-        
-        if bot.session:
-            await bot.session.close()
-            logger.info("✅ Сессия закрыта")
     except Exception as e:
-        logger.warning(f"⚠️ Ошибка очистки: {e}")
+        logger.warning(f"⚠️ Ошибка при удалении вебхука: {e}")
     
-    # ПРОВЕРКА АВТОРИЗАЦИИ
-    try:
-        me = await bot.get_me()
-        logger.info(f"✅ Бот @{me.username} авторизован")
-    except Exception as e:
-        logger.error(f"❌ Ошибка: {e}")
-        logger.info("⏳ Ожидание 15 секунд...")
-        await asyncio.sleep(15)
+    # Небольшая пауза
+    await asyncio.sleep(2)
     
-    # УВЕЛИЧЕННАЯ ПАУЗА
-    await asyncio.sleep(5)
-    logger.info("✅ Запуск...")
-    
+    # Запускаем автопинг
     ping_service.start()
     
-    # ЗАПУСК С ТАЙМАУТОМ
-    await dp.start_polling(bot, timeout=30)
+    # Запускаем поллинг
+    logger.info("✅ Запуск polling...")
+    await dp.start_polling(bot)
+
 
 def run_fastapi():
     """Запуск FastAPI в отдельном потоке"""
@@ -578,15 +567,12 @@ def run_fastapi():
 if __name__ == "__main__":
     import threading
     
-    # FastAPI может работать в отдельном потоке
+    # FastAPI в отдельном потоке
     fastapi_thread = threading.Thread(target=run_fastapi, daemon=True)
     fastapi_thread.start()
     
     # Даем FastAPI время запуститься
     time.sleep(2)
     
-    # Бот ДОЛЖЕН быть в главном потоке!
+    # Бот в главном потоке
     asyncio.run(main())
-
-
-
