@@ -6,11 +6,11 @@
 import asyncio
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -18,8 +18,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from fastapi import FastAPI
 import uvicorn
 
-from config import BOT_TOKEN, VERSION, PORT, RENDER_URL
-from yandex_disk import add_expense, add_income, delete_last, download_from_yandex
+from config import BOT_TOKEN, VERSION, PORT, RENDER_URL, LOCAL_EXCEL_PATH
+from yandex_disk import add_expense, add_income, delete_last, download_from_yandex, get_statistics
 from ping_service import ping_service
 
 logging.basicConfig(
@@ -62,9 +62,13 @@ PAYMENT_METHODS = ["💵 Наличные", "💳 Карта Муж", "💳 Ка
 # ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 def get_moscow_time() -> str:
     """Получить текущее время по Москве"""
-    from datetime import timezone, timedelta
     moscow_tz = timezone(timedelta(hours=3))
     return datetime.now(moscow_tz).strftime("%H:%M:%S")
+
+
+def get_current_date() -> str:
+    """Получить текущую дату"""
+    return datetime.now(timezone(timedelta(hours=3))).strftime("%Y-%m-%d")
 
 
 # ========== КЛАВИАТУРЫ ==========
@@ -168,6 +172,7 @@ async def ping_endpoint():
     return {
         "status": "alive",
         "time": get_moscow_time(),
+        "date": get_current_date(),
         "bot": "running"
     }
 
@@ -251,8 +256,6 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_text("⏬ Скачиваю файл с Яндекс.Диска...")
         
         if download_from_yandex():
-            from aiogram.types import FSInputFile
-            from config import LOCAL_EXCEL_PATH
             try:
                 file_to_send = FSInputFile(LOCAL_EXCEL_PATH)
                 await callback.message.answer_document(
@@ -286,7 +289,6 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
     
     elif data == "stats_categories":
         await callback.message.edit_text("⏳ Считаю расходы по категориям...")
-        from yandex_disk import get_statistics
         stats_text = get_statistics(by_categories=True)
         await callback.message.edit_text(
             f"📊 <b>Расходы по категориям:</b>\n\n{stats_text}",
@@ -297,7 +299,6 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
     
     elif data == "stats_balance":
         await callback.message.edit_text("⏳ Считаю баланс...")
-        from yandex_disk import get_statistics
         balance_text = get_statistics(balance=True)
         await callback.message.edit_text(
             f"💰 <b>Текущий баланс:</b>\n\n{balance_text}",
@@ -308,7 +309,6 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
     
     elif data == "period_current":
         await callback.message.edit_text("⏳ Считаю статистику за текущий период...")
-        from yandex_disk import get_statistics
         stats_text = get_statistics(period="current")
         await callback.message.edit_text(
             f"📊 <b>Статистика за текущий период (10-24):</b>\n\n{stats_text}",
@@ -319,7 +319,6 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
     
     elif data == "period_previous":
         await callback.message.edit_text("⏳ Считаю статистику за предыдущий период...")
-        from yandex_disk import get_statistics
         stats_text = get_statistics(period="previous")
         await callback.message.edit_text(
             f"📊 <b>Статистика за предыдущий период (25-9):</b>\n\n{stats_text}",
@@ -330,7 +329,6 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
     
     elif data == "period_all":
         await callback.message.edit_text("⏳ Считаю статистику за всё время...")
-        from yandex_disk import get_statistics
         stats_text = get_statistics(period="all")
         await callback.message.edit_text(
             f"📊 <b>Статистика за всё время:</b>\n\n{stats_text}",
@@ -547,16 +545,18 @@ async def main():
     await dp.start_polling(bot)
 
 
+def run_fastapi():
+    """Запуск FastAPI в отдельном потоке"""
+    logger.info(f"🌍 Запуск FastAPI сервера на порту {PORT}")
+    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
+
+
 if __name__ == "__main__":
     import threading
     
-    def run_bot():
-        asyncio.run(main())
+    # FastAPI может работать в отдельном потоке
+    fastapi_thread = threading.Thread(target=run_fastapi, daemon=True)
+    fastapi_thread.start()
     
-    # Запускаем бота в фоновом потоке
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
-    
-    # Запускаем FastAPI сервер в главном потоке
-    logger.info(f"🌍 Запуск FastAPI сервера на порту {PORT}")
-    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
+    # Бот ДОЛЖЕН быть в главном потоке!
+    asyncio.run(main())
