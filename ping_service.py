@@ -40,32 +40,30 @@ class PingService:
         # Даем время на полный запуск бота
         time.sleep(30)
         
-        # Пингуем разные эндпоинты для надежности
-        endpoints = ["/ping", "/health", "/"]
+        # Убираем лишний слеш в URL
+        base_url = RENDER_URL.rstrip('/')
         
-        logger.info(f"🧵 Поток пинга запущен для {RENDER_URL}")
+        logger.info(f"🧵 Поток пинга запущен для {base_url}")
         
         while self.running:
             self.ping_count += 1
             
-            # Пробуем разные эндпоинты по очереди
-            for endpoint in endpoints:
-                try:
-                    url = f"{RENDER_URL}{endpoint}"
-                    response = requests.get(url, timeout=10)
+            # Пингуем корневой эндпоинт
+            try:
+                url = f"{base_url}/"
+                response = requests.get(url, timeout=10)
+                
+                if response.status_code == 200:
+                    logger.info(f"✅ Пинг #{self.ping_count} - успешно (200)")
+                else:
+                    logger.warning(f"⚠️ Пинг #{self.ping_count} - код {response.status_code}")
                     
-                    if response.status_code == 200:
-                        logger.info(f"✅ Пинг #{self.ping_count} - {endpoint} - {response.status_code}")
-                        break  # Успешно, выходим из цикла эндпоинтов
-                    else:
-                        logger.warning(f"⚠️ Пинг #{self.ping_count} - {endpoint} - код {response.status_code}")
-                        
-                except requests.exceptions.ConnectionError:
-                    logger.warning(f"⚠️ Пинг #{self.ping_count} - {endpoint} - сервер еще не готов")
-                except requests.exceptions.Timeout:
-                    logger.warning(f"⚠️ Пинг #{self.ping_count} - {endpoint} - таймаут")
-                except Exception as e:
-                    logger.error(f"❌ Пинг #{self.ping_count} - {endpoint} - ошибка: {e}")
+            except requests.exceptions.ConnectionError:
+                logger.warning(f"⚠️ Пинг #{self.ping_count} - сервер еще не готов")
+            except requests.exceptions.Timeout:
+                logger.warning(f"⚠️ Пинг #{self.ping_count} - таймаут")
+            except Exception as e:
+                logger.error(f"❌ Пинг #{self.ping_count} - ошибка: {e}")
             
             # Ждем следующий пинг (5 минут)
             for _ in range(PING_INTERVAL):
