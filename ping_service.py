@@ -20,7 +20,7 @@ class PingService:
         self.running = True
         self.thread = threading.Thread(target=self._ping_worker, daemon=True)
         self.thread.start()
-        logger.info("✅ Автопинг запущен (3 минуты)")
+        logger.info("✅ Автопинг запущен (каждые 3 минуты)")
     
     def _ping_worker(self):
         time.sleep(60)
