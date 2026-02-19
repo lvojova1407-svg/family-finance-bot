@@ -1,6 +1,6 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-Версия 5.0 - СТАБИЛЬНАЯ РАБОТА НА БЕСПЛАТНОМ ТАРИФЕ
+Версия 5.2 - С ВЕБ-СЕРВЕРОМ ДЛЯ RENDER
 """
 
 import os
@@ -20,10 +20,10 @@ import uvicorn
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
-    MessageHandler,
-    filters,
     CommandHandler,
     CallbackQueryHandler,
+    MessageHandler,
+    filters,
     ContextTypes
 )
 
@@ -42,7 +42,7 @@ bot_app: Optional[Application] = None
 startup_time = datetime.now(timezone.utc)
 
 # ========== FASTAPI ПРИЛОЖЕНИЕ ==========
-app = FastAPI(
+web_app = FastAPI(
     title="Family Finance Bot",
     description="Бот для учета семейных финансов",
     version=VERSION
@@ -161,6 +161,69 @@ def get_delete_keyboard():
         [InlineKeyboardButton(text="🔙 Назад", callback_data="stats_menu")]
     ]
     return InlineKeyboardMarkup(keyboard)
+
+
+# ========== FASTAPI ЭНДПОИНТЫ ==========
+@web_app.get("/")
+@web_app.get("/health")
+@web_app.get("/ping")
+async def health_check():
+    """Health check для Render"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "bot_running": bool(bot_app),
+        "time_moscow": get_moscow_time(),
+        "date": get_current_date(),
+        "version": VERSION
+    }
+
+@web_app.get("/stats")
+async def stats():
+    """Статистика сервера"""
+    return {
+        "uptime": str(datetime.now(timezone.utc) - startup_time),
+        "port": PORT,
+        "bot_initialized": bool(bot_app)
+    }
+
+
+# ========== ЗАПУСК ВЕБ-СЕРВЕРА В ОТДЕЛЬНОМ ПОТОКЕ ==========
+def run_web_server():
+    """Запуск FastAPI сервера в отдельном потоке"""
+    uvicorn.run(web_app, host="0.0.0.0", port=PORT, log_level="error")
+
+# Запускаем веб-сервер сразу
+web_thread = threading.Thread(target=run_web_server, daemon=True)
+web_thread.start()
+logger.info(f"🌍 Веб-сервер запущен на порту {PORT}")
+
+
+# ========== АВТО-ПИНГ ==========
+def start_auto_ping():
+    """Запускает авто-пинг в отдельном потоке"""
+    def ping_worker():
+        time.sleep(30)  # Даем время на запуск
+        url = f"{RENDER_URL.rstrip('/')}/health"
+        logger.info(f"🧵 Авто-пинг запущен для {url}")
+        
+        ping_count = 0
+        while True:
+            ping_count += 1
+            try:
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    logger.info(f"✅ Авто-пинг #{ping_count} успешен")
+                else:
+                    logger.info(f"📡 Авто-пинг #{ping_count}: код {response.status_code}")
+            except Exception as e:
+                logger.debug(f"Авто-пинг #{ping_count}: {e}")
+            
+            time.sleep(240)  # 4 минуты (Render убивает через 5 минут)
+    
+    thread = threading.Thread(target=ping_worker, daemon=True)
+    thread.start()
+    logger.info("✅ Поток авто-пинга создан")
 
 
 # ========== ОБРАБОТЧИКИ КОМАНД ==========
@@ -527,64 +590,8 @@ async def start_bot():
         return False
 
 
-# ========== АВТО-ПИНГ ==========
-def start_auto_ping():
-    """Запускает авто-пинг в отдельном потоке"""
-    def ping_worker():
-        time.sleep(30)
-        url = f"{RENDER_URL.rstrip('/')}/health"
-        logger.info(f"🧵 Авто-пинг запущен для {url}")
-        
-        ping_count = 0
-        while True:
-            ping_count += 1
-            try:
-                response = requests.get(url, timeout=10)
-                if response.status_code == 200:
-                    logger.info(f"✅ Авто-пинг #{ping_count} успешен")
-                else:
-                    logger.warning(f"⚠️ Авто-пинг #{ping_count}: код {response.status_code}")
-            except Exception as e:
-                logger.error(f"❌ Ошибка авто-пинга #{ping_count}: {e}")
-            
-            time.sleep(480)  # 8 минут
-    
-    thread = threading.Thread(target=ping_worker, daemon=True)
-    thread.start()
-    logger.info("✅ Поток авто-пинга создан")
-
-
-# ========== FASTAPI ЭНДПОИНТЫ ==========
-@app.get("/")
-async def root():
-    return {
-        "message": "Family Finance Bot",
-        "status": "running",
-        "bot": "active" if bot_app else "starting",
-        "time_moscow": get_moscow_time(),
-        "date": get_current_date(),
-        "version": VERSION
-    }
-
-@app.get("/health")
-async def health_check():
-    """Health check для Render"""
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "bot_running": bool(bot_app),
-        "time_moscow": get_moscow_time()
-    }
-
-@app.get("/ping")
-async def ping():
-    return {"ping": "pong", "time": get_moscow_time()}
-
-
-# ========== ЗАПУСК ПРИЛОЖЕНИЯ ==========
-@app.on_event("startup")
-async def startup_event():
-    """Запуск при старте приложения"""
+# ========== ОСНОВНАЯ ФУНКЦИЯ ==========
+async def main():
     logger.info("=" * 50)
     logger.info(f"🚀 ЗАПУСК БОТА v{VERSION}")
     logger.info("=" * 50)
@@ -594,9 +601,11 @@ async def startup_event():
     logger.info(f"📅 Дата: {get_current_date()}")
     logger.info(f"🌐 Порт: {PORT}")
     
+    # Запускаем авто-пинг
     start_auto_ping()
-    logger.info("🔧 Авто-пинг запущен (пинг каждые 8 минут)")
+    logger.info("🔧 Авто-пинг запущен (пинг каждые 4 минуты)")
     
+    # Запускаем бота
     success = await start_bot()
     
     if success:
@@ -604,33 +613,12 @@ async def startup_event():
     else:
         logger.error("💥 Не удалось запустить бота!")
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Остановка при завершении"""
-    logger.info("🛑 Завершение работы...")
-    
-    if bot_app:
-        try:
-            await bot_app.updater.stop()
-            await bot_app.stop()
-            await bot_app.shutdown()
-            logger.info("✅ Telegram бот остановлен")
-        except Exception as e:
-            logger.error(f"❌ Ошибка при остановке бота: {e}")
-
 
 # ========== ТОЧКА ВХОДА ==========
-def main():
-    logger.info(f"🌍 Запуск сервера на порту {PORT}...")
-    
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=PORT,
-        access_log=False,
-        log_level="info"
-    )
-
 if __name__ == "__main__":
-    main()
-
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("👋 Бот остановлен пользователем")
+    except Exception as e:
+        logger.error(f"💥 Критическая ошибка: {e}")
