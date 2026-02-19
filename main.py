@@ -1,6 +1,6 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-Версия 3.0 - ЗАЩИТА ОТ УБИЙСТВА RENDER
+Версия 4.0 - ПОЛНЫЙ ФУНКЦИОНАЛ + ЗАЩИТА ОТ СМЕРТИ
 """
 
 import asyncio
@@ -8,23 +8,22 @@ import logging
 import re
 import time
 import os
-import signal
-import socket
 import sys
+import threading
+import signal
 import random
 from datetime import datetime, timezone, timedelta
 
-import psutil
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.exceptions import TelegramConflictError, TelegramRetryAfter, TelegramNetworkError
 
 from fastapi import FastAPI
 import uvicorn
+import requests
 
 from config import BOT_TOKEN, VERSION, PORT, RENDER_URL, LOCAL_EXCEL_PATH
 from yandex_disk import add_expense, add_income, delete_last, download_from_yandex, get_statistics
@@ -37,82 +36,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# ========== ОБРАБОТКА СИГНАЛОВ ==========
-def handle_shutdown():
-    """Корректное завершение при получении SIGTERM"""
-    logger.info("🛑 Получен сигнал SIGTERM, игнорируем...")
-    # Не выходим, просто логируем
-    return
-
-# Регистрируем обработчик SIGTERM (ИГНОРИРУЕМ!)
-signal.signal(signal.SIGTERM, lambda sig, frame: handle_shutdown())
-
-
-# ========== ЗАЩИТА ОТ ДВОЙНОГО ЗАПУСКА ==========
-def ensure_single_instance():
-    """Гарантирует, что работает только один экземпляр бота"""
-    try:
-        current_pid = os.getpid()
-        lock_file = "bot.lock"
-        
-        # Проверяем, не вызваны ли мы повторно
-        if os.path.exists(lock_file):
-            with open(lock_file, 'r') as f:
-                old_pid = int(f.read().strip())
-            if old_pid == current_pid:
-                logger.info(f"✅ Уже инициализированы с PID {current_pid}")
-                return
-        
-        logger.info(f"🔍 Текущий PID: {current_pid}")
-        
-        # 1. Проверка через файл блокировки
-        if os.path.exists(lock_file):
-            try:
-                with open(lock_file, 'r') as f:
-                    old_pid = int(f.read().strip())
-                # Проверяем, жив ли процесс и не равен ли текущему
-                if old_pid != current_pid and psutil.pid_exists(old_pid):
-                    logger.warning(f"⚠️ Найден живой процесс {old_pid}, убиваем...")
-                    try:
-                        os.kill(old_pid, signal.SIGTERM)
-                        time.sleep(3)
-                        if psutil.pid_exists(old_pid):
-                            os.kill(old_pid, signal.SIGKILL)
-                            time.sleep(2)
-                    except ProcessLookupError:
-                        pass
-                    except Exception as e:
-                        logger.warning(f"⚠️ Ошибка при убийстве процесса: {e}")
-            except Exception as e:
-                logger.warning(f"⚠️ Ошибка чтения lock-файла: {e}")
-        
-        # 2. Проверка порта
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        result = sock.connect_ex(('127.0.0.1', PORT))
-        sock.close()
-        
-        if result == 0:
-            logger.warning(f"⚠️ Порт {PORT} занят! Ждем 15 секунд...")
-            time.sleep(15)
-            
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            result = sock.connect_ex(('127.0.0.1', PORT))
-            sock.close()
-            
-            if result == 0:
-                logger.error(f"❌ Порт {PORT} все еще занят! Принудительно продолжаем...")
-            else:
-                logger.info(f"✅ Порт {PORT} освободился")
-        else:
-            logger.info(f"✅ Порт {PORT} свободен")
-        
-        # 3. Записываем свой PID
-        with open(lock_file, 'w') as f:
-            f.write(str(current_pid))
-        logger.info(f"✅ PID {current_pid} записан в блокировку")
-        
-    except Exception as e:
-        logger.warning(f"⚠️ Ошибка в ensure_single_instance: {e}")
+# ========== УБИВАЕМ ВСЕ СТАРЫЕ ПРОЦЕССЫ ==========
+current_pid = os.getpid()
+os.system("pkill -f 'python.*main.py' | true")
+os.system("pkill -f 'uvicorn' | true")
+with open("bot.lock", "w") as f:
+    f.write(str(current_pid))
+logger.info(f"🔥 Убиты все старые процессы")
+logger.info(f"✅ Текущий PID: {current_pid}")
 
 
 # ========== ИНИЦИАЛИЗАЦИЯ БОТА ==========
@@ -121,27 +52,6 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
 logger.info("✅ Бот инициализирован")
-
-
-# ========== ГЛОБАЛЬНЫЙ ОБРАБОТЧИК ОШИБОК ==========
-@dp.errors()
-async def global_error_handler(update: types.Update, exception: Exception):
-    """Перехватывает все ошибки и логирует их без паники"""
-    if isinstance(exception, TelegramConflictError):
-        logger.warning(f"⚠️ Перехвачен конфликт: {exception}")
-        # Не паникуем, просто логируем
-        return True
-    elif isinstance(exception, TelegramRetryAfter):
-        logger.warning(f"⏳ Telegram просит подождать {exception.timeout} сек")
-        await asyncio.sleep(exception.timeout)
-        return True
-    elif isinstance(exception, TelegramNetworkError):
-        logger.error(f"🌐 Сетевая ошибка: {exception}")
-        await asyncio.sleep(5)
-        return True
-    else:
-        logger.error(f"❌ Неизвестная ошибка: {exception}")
-        return True
 
 
 class FinanceStates(StatesGroup):
@@ -171,13 +81,10 @@ PAYMENT_METHODS = ["💵 Наличные", "💳 Карта Муж", "💳 Ка
 
 # ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 def get_moscow_time() -> str:
-    """Получить текущее время по Москве"""
     moscow_tz = timezone(timedelta(hours=3))
     return datetime.now(moscow_tz).strftime("%H:%M:%S")
 
-
 def get_current_date() -> str:
-    """Получить текущую дату"""
     return datetime.now(timezone(timedelta(hours=3))).strftime("%Y-%m-%d")
 
 
@@ -190,7 +97,6 @@ def get_main_keyboard():
         [InlineKeyboardButton(text="📊 Статистика и файлы", callback_data="stats_menu")]
     ])
 
-
 def get_stats_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📥 Скачать Excel файл", callback_data="download_excel")],
@@ -200,7 +106,6 @@ def get_stats_keyboard():
         [InlineKeyboardButton(text="🔙 Назад в главное меню", callback_data="back_main")]
     ])
 
-
 def get_period_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📅 Текущий период (10-24)", callback_data="period_current")],
@@ -208,7 +113,6 @@ def get_period_keyboard():
         [InlineKeyboardButton(text="📅 За всё время", callback_data="period_all")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="stats_menu")]
     ])
-
 
 def get_categories_keyboard():
     keyboard = []
@@ -225,7 +129,6 @@ def get_categories_keyboard():
     keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_main")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-
 def get_hidden_categories_keyboard():
     keyboard = []
     for i in range(0, len(HIDDEN_CATEGORIES), 2):
@@ -238,12 +141,10 @@ def get_hidden_categories_keyboard():
     keyboard.append([InlineKeyboardButton(text="🔙 Назад к основным категориям", callback_data="back_to_main_categories")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-
 def get_payers_keyboard():
     keyboard = [[InlineKeyboardButton(text=p, callback_data=f"payer_{p}")] for p in PAYERS]
     keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_categories")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
 
 def get_payment_methods_keyboard():
     keyboard = []
@@ -256,12 +157,10 @@ def get_payment_methods_keyboard():
     keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_payers")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-
 def get_income_sources_keyboard():
     keyboard = [[InlineKeyboardButton(text=s, callback_data=f"source_{s}")] for s in INCOME_SOURCES]
     keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_main")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
 
 def get_delete_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -278,12 +177,11 @@ app = FastAPI(title="Family Finance Bot")
 @app.get("/health")
 @app.get("/ping")
 async def ping_endpoint():
-    """Универсальный эндпоинт для пинга"""
     return {
         "status": "alive",
         "time": get_moscow_time(),
         "date": get_current_date(),
-        "bot": "running"
+        "pid": current_pid
     }
 
 
@@ -297,7 +195,6 @@ async def cmd_start(message: types.Message):
         reply_markup=get_main_keyboard(),
         parse_mode="HTML"
     )
-
 
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
@@ -326,7 +223,6 @@ async def cmd_help(message: types.Message):
     """
     await message.answer(help_text, parse_mode="HTML")
 
-
 @dp.message(Command("stats"))
 async def cmd_stats(message: types.Message):
     await message.answer(
@@ -335,10 +231,8 @@ async def cmd_stats(message: types.Message):
         parse_mode="HTML"
     )
 
-
 @dp.message(Command("ping"))
 async def cmd_ping(message: types.Message):
-    """Ручная проверка пинга"""
     await message.answer(f"🏓 Pong! Время: {get_moscow_time()}")
 
 
@@ -597,7 +491,6 @@ async def process_expense_amount(message: types.Message, state: FSMContext):
     )
     await state.clear()
 
-
 @dp.message(FinanceStates.waiting_for_income_amount)
 async def process_income_amount(message: types.Message, state: FSMContext):
     text = message.text.strip()
@@ -632,7 +525,6 @@ async def process_income_amount(message: types.Message, state: FSMContext):
     )
     await state.clear()
 
-
 @dp.message()
 async def handle_unknown(message: types.Message):
     await message.answer(
@@ -641,21 +533,17 @@ async def handle_unknown(message: types.Message):
     )
 
 
-# ========== ЗАПУСК БОТА ==========
+# ========== ЗАПУСК ==========
 async def main():
     logger.info("=" * 50)
-    logger.info(f"🚀 ЗАПУСК ФИНАНСОВОГО БОТА v{VERSION}")
+    logger.info(f"🚀 ЗАПУСК БОТА v{VERSION} (PID: {current_pid})")
     logger.info("=" * 50)
     
-    # Игнорируем SIGTERM - Render больше не убьет бота
-    logger.info("🛡️ Защита от SIGTERM активирована")
-    
-    # Удаляем вебхук
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         logger.info("✅ Вебхук удален")
     except Exception as e:
-        logger.warning(f"⚠️ Ошибка при удалении вебхука: {e}")
+        logger.warning(f"⚠️ Ошибка удаления вебхука: {e}")
     
     # Случайная задержка
     delay = random.randint(5, 15)
@@ -665,45 +553,33 @@ async def main():
     # Запускаем автопинг
     ping_service.start()
     
-    # Запускаем поллинг с бесконечными попытками
     logger.info("✅ Запуск polling...")
     
+    # Бесконечный цикл с перезапуском
     retry_count = 0
     while True:
         try:
             await dp.start_polling(bot)
-        except TelegramConflictError as e:
-            retry_count += 1
-            wait_time = min(30, 5 + retry_count * 2)
-            logger.warning(f"⚠️ Конфликт #{retry_count}: {e}. Ожидание {wait_time}с...")
-            await asyncio.sleep(wait_time)
-            continue
         except Exception as e:
             retry_count += 1
-            wait_time = min(60, 10 + retry_count * 5)
-            logger.error(f"❌ Ошибка #{retry_count}: {e}. Ожидание {wait_time}с...")
+            wait_time = min(30, 5 + retry_count * 2)
+            logger.error(f"❌ Ошибка #{retry_count}: {e}. Перезапуск через {wait_time}с...")
             await asyncio.sleep(wait_time)
             continue
 
 
 def run_fastapi():
-    """Запуск FastAPI в отдельном потоке"""
-    logger.info(f"🌍 Запуск FastAPI сервера на порту {PORT}")
-    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="error")
 
 
 if __name__ == "__main__":
-    import threading
-    
-    # ТОЛЬКО ОДИН ВЫЗОВ ЗДЕСЬ!
-    ensure_single_instance()
-    
-    # FastAPI в отдельном потоке
+    # FastAPI в фоне
     fastapi_thread = threading.Thread(target=run_fastapi, daemon=True)
     fastapi_thread.start()
+    logger.info(f"🌍 FastAPI запущен на порту {PORT}")
     
-    # Даем FastAPI время запуститься
-    time.sleep(5)
+    # Небольшая пауза
+    time.sleep(3)
     
-    # Бот в главном потоке
+    # Запуск бота
     asyncio.run(main())
