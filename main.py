@@ -1,6 +1,6 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-Версия 3.0 - МАКСИМАЛЬНАЯ ЗАЩИТА ОТ КОНФЛИКТОВ
+Версия 3.0 - ФИНАЛЬНАЯ СТАБИЛЬНАЯ ВЕРСИЯ
 """
 
 import asyncio
@@ -40,16 +40,25 @@ def ensure_single_instance():
     """Гарантирует, что работает только один экземпляр бота"""
     try:
         current_pid = os.getpid()
+        lock_file = "bot.lock"
+        
+        # Проверяем, не вызваны ли мы повторно
+        if os.path.exists(lock_file):
+            with open(lock_file, 'r') as f:
+                old_pid = int(f.read().strip())
+            if old_pid == current_pid:
+                logger.info(f"✅ Уже инициализированы с PID {current_pid}")
+                return
+        
         logger.info(f"🔍 Текущий PID: {current_pid}")
         
-        # 1. Проверка через файл блокировки
-        lock_file = "bot.lock"
+        # 1. Проверка через файл блокировки (только если PID другой)
         if os.path.exists(lock_file):
             try:
                 with open(lock_file, 'r') as f:
                     old_pid = int(f.read().strip())
-                # Проверяем, жив ли процесс
-                if psutil.pid_exists(old_pid):
+                # Проверяем, жив ли процесс и не равен ли текущему
+                if old_pid != current_pid and psutil.pid_exists(old_pid):
                     logger.warning(f"⚠️ Найден живой процесс {old_pid}, убиваем...")
                     try:
                         os.kill(old_pid, signal.SIGTERM)
@@ -93,10 +102,6 @@ def ensure_single_instance():
         
     except Exception as e:
         logger.warning(f"⚠️ Ошибка в ensure_single_instance: {e}")
-
-
-# Вызываем защиту при запуске
-ensure_single_instance()
 
 
 # ========== ИНИЦИАЛИЗАЦИЯ БОТА ==========
@@ -637,7 +642,7 @@ def run_fastapi():
 if __name__ == "__main__":
     import threading
     
-    # Максимальная защита от конфликтов
+    # ТОЛЬКО ОДИН ВЫЗОВ ЗДЕСЬ!
     ensure_single_instance()
     
     # FastAPI в отдельном потоке
