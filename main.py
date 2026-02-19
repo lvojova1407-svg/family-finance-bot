@@ -1,6 +1,6 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-Версия 4.0 - ПОЛНЫЙ ФУНКЦИОНАЛ + БЕЗОПАСНОЕ УБИЙСТВО ПРОЦЕССОВ
+Версия 4.0 - С МИНУТНЫМ ПИНГОМ
 """
 
 import os
@@ -21,6 +21,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFil
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.exceptions import TelegramConflictError
 
 from fastapi import FastAPI
 import uvicorn
@@ -90,6 +91,22 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
 logger.info("✅ Бот инициализирован")
+
+
+# ========== ПРАВИЛЬНЫЙ ОБРАБОТЧИК ОШИБОК ==========
+@dp.errors()
+async def errors_handler(update: types.Update, exception: Exception):
+    """Правильный обработчик ошибок aiogram"""
+    try:
+        if isinstance(exception, TelegramConflictError):
+            logger.warning(f"⚠️ Конфликт (игнорируем)")
+            return True
+        else:
+            logger.error(f"❌ Ошибка: {exception}")
+            return True
+    except Exception as e:
+        logger.error(f"❌ Ошибка в обработчике: {e}")
+        return True
 
 
 class FinanceStates(StatesGroup):
@@ -592,22 +609,13 @@ async def main():
     logger.info(f"⏳ Ожидание {delay} секунд...")
     await asyncio.sleep(delay)
     
-    # Запускаем автопинг
+    # Запускаем активный пинг (каждую минуту)
     ping_service.start()
     
     logger.info("✅ Запуск polling...")
     
-    # Бесконечный цикл с перезапуском
-    retry_count = 0
-    while True:
-        try:
-            await dp.start_polling(bot)
-        except Exception as e:
-            retry_count += 1
-            wait_time = min(30, 5 + retry_count * 2)
-            logger.error(f"❌ Ошибка #{retry_count}: {e}. Перезапуск через {wait_time}с...")
-            await asyncio.sleep(wait_time)
-            continue
+    # ПРОСТО ЗАПУСКАЕМ - без while True
+    await dp.start_polling(bot)
 
 
 def run_fastapi():
