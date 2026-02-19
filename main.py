@@ -1,7 +1,6 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-Версия 3.0 - ФИНАЛЬНАЯ СТАБИЛЬНАЯ ВЕРСИЯ
-С защитой от всех конфликтов на Render
+Версия 3.0 - С АВТОМАТИЧЕСКИМ ПЕРЕЗАПУСКОМ ПРИ КОНФЛИКТАХ
 """
 
 import asyncio
@@ -22,6 +21,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFil
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.exceptions import TelegramConflictError
 
 from fastapi import FastAPI
 import uvicorn
@@ -647,9 +647,26 @@ async def main():
     # Запускаем автопинг
     ping_service.start()
     
-    # Запускаем поллинг
+    # Запускаем поллинг с бесконечным перезапуском
     logger.info("✅ Запуск polling...")
-    await dp.start_polling(bot)
+    
+    retry_count = 0
+    while True:
+        try:
+            await dp.start_polling(bot)
+        except TelegramConflictError as e:
+            retry_count += 1
+            wait_time = min(30, 5 + retry_count * 2)  # Увеличиваем время ожидания
+            logger.warning(f"⚠️ Конфликт #{retry_count}: {e}. Перезапуск через {wait_time} секунд...")
+            await asyncio.sleep(wait_time)
+            continue
+        except Exception as e:
+            retry_count += 1
+            wait_time = min(60, 10 + retry_count * 5)
+            logger.error(f"❌ Критическая ошибка #{retry_count}: {e}. Перезапуск через {wait_time} секунд...")
+            await asyncio.sleep(wait_time)
+            continue
+        break  # Выходим если нормально завершилось
 
 
 def run_fastapi():
