@@ -1,6 +1,7 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
 Версия 3.0 - ФИНАЛЬНАЯ СТАБИЛЬНАЯ ВЕРСИЯ
+С защитой от всех конфликтов на Render
 """
 
 import asyncio
@@ -11,6 +12,7 @@ import os
 import signal
 import socket
 import sys
+import random
 from datetime import datetime, timezone, timedelta
 
 import psutil
@@ -35,7 +37,24 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# ========== МАКСИМАЛЬНАЯ ЗАЩИТА ОТ КОНФЛИКТОВ ==========
+# ========== ОБРАБОТКА СИГНАЛОВ ==========
+def handle_shutdown():
+    """Корректное завершение при получении SIGTERM"""
+    logger.info("🛑 Получен сигнал SIGTERM, сохраняем состояние...")
+    try:
+        if os.path.exists("bot.lock"):
+            os.remove("bot.lock")
+            logger.info("✅ Файл блокировки удален")
+    except Exception as e:
+        logger.warning(f"⚠️ Ошибка при удалении lock-файла: {e}")
+    logger.info("👋 Бот завершает работу")
+    sys.exit(0)
+
+# Регистрируем обработчик SIGTERM
+signal.signal(signal.SIGTERM, lambda sig, frame: handle_shutdown())
+
+
+# ========== ЗАЩИТА ОТ ДВОЙНОГО ЗАПУСКА ==========
 def ensure_single_instance():
     """Гарантирует, что работает только один экземпляр бота"""
     try:
@@ -52,7 +71,7 @@ def ensure_single_instance():
         
         logger.info(f"🔍 Текущий PID: {current_pid}")
         
-        # 1. Проверка через файл блокировки (только если PID другой)
+        # 1. Проверка через файл блокировки
         if os.path.exists(lock_file):
             try:
                 with open(lock_file, 'r') as f:
@@ -63,7 +82,6 @@ def ensure_single_instance():
                     try:
                         os.kill(old_pid, signal.SIGTERM)
                         time.sleep(3)
-                        # Если процесс еще жив, убиваем принудительно
                         if psutil.pid_exists(old_pid):
                             os.kill(old_pid, signal.SIGKILL)
                             time.sleep(2)
@@ -83,7 +101,6 @@ def ensure_single_instance():
             logger.warning(f"⚠️ Порт {PORT} занят! Ждем 15 секунд...")
             time.sleep(15)
             
-            # Повторная проверка
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             result = sock.connect_ex(('127.0.0.1', PORT))
             sock.close()
@@ -615,15 +632,17 @@ async def main():
     logger.info(f"🚀 ЗАПУСК ФИНАНСОВОГО БОТА v{VERSION}")
     logger.info("=" * 50)
     
-    # Просто удаляем вебхук, без лишних действий
+    # Удаляем вебхук
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         logger.info("✅ Вебхук удален")
     except Exception as e:
         logger.warning(f"⚠️ Ошибка при удалении вебхука: {e}")
     
-    # Небольшая пауза
-    await asyncio.sleep(2)
+    # СЛУЧАЙНАЯ ЗАДЕРЖКА для избежания конфликтов
+    delay = random.randint(5, 15)
+    logger.info(f"⏳ Ожидание {delay} секунд для синхронизации...")
+    await asyncio.sleep(delay)
     
     # Запускаем автопинг
     ping_service.start()
@@ -649,7 +668,7 @@ if __name__ == "__main__":
     fastapi_thread = threading.Thread(target=run_fastapi, daemon=True)
     fastapi_thread.start()
     
-    # Увеличенная пауза
+    # Даем FastAPI время запуститься
     time.sleep(5)
     
     # Бот в главном потоке
