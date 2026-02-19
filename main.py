@@ -618,7 +618,14 @@ async def main():
 if __name__ == "__main__":
     try:
         asyncio.run(main())
+        # Бесконечное ожидание после завершения asyncio.run
+        while True:
+            time.sleep(60)
+            logger.debug("Главный поток ожидает...")
     except KeyboardInterrupt:
         logger.info("👋 Бот остановлен пользователем")
     except Exception as e:
         logger.error(f"💥 Критическая ошибка: {e}")
+        # Даже при ошибке держим процесс живым
+        while True:
+            time.sleep(60)
