@@ -18,4 +18,4 @@ VERSION = "3.0.0"
 # ========== ДЛЯ АВТО-ПИНГА ==========
 PORT = int(os.getenv("PORT", 10000))
 RENDER_URL = os.getenv("RENDER_URL", "https://family-finance-bot.onrender.com")
-PING_INTERVAL = 200 
+PING_INTERVAL = 180  # 3 минуты (меньше 5 минут таймаута Render)
