@@ -1,6 +1,6 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-Версия 3.0 - С ЗАЩИТОЙ ОТ ДВОЙНОГО ЗАПУСКА
+Версия 3.0 - С ЗАЩИТОЙ ОТ КОНФЛИКТОВ ЧЕРЕЗ ПОРТ
 """
 
 import asyncio
@@ -8,7 +8,7 @@ import logging
 import re
 import time
 import os
-import signal
+import socket
 import sys
 from datetime import datetime, timezone, timedelta
 
@@ -32,33 +32,32 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ========== ЗАЩИТА ОТ ДВОЙНОГО ЗАПУСКА ==========
-def kill_old_process():
-    """Убивает старые процессы бота и создает файл блокировки"""
+# ========== ЗАЩИТА ОТ ДВОЙНОГО ЗАПУСКА ЧЕРЕЗ ПОРТ ==========
+def check_port():
+    """Проверяет, не занят ли порт другим процессом"""
     try:
-        lock_file = "bot.lock"
-        if os.path.exists(lock_file):
-            with open(lock_file, 'r') as f:
-                old_pid = int(f.read().strip())
-            try:
-                # Отправляем сигнал завершения старому процессу
-                os.kill(old_pid, signal.SIGTERM)
-                logger.info(f"✅ Убит старый процесс с PID {old_pid}")
-                time.sleep(2)  # Даем время на завершение
-            except ProcessLookupError:
-                logger.info(f"⚠️ Старый процесс {old_pid} уже завершен")
-            except Exception as e:
-                logger.warning(f"⚠️ Ошибка при убийстве процесса: {e}")
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        result = sock.connect_ex(('127.0.0.1', PORT))
+        sock.close()
         
-        # Записываем свой PID
-        with open(lock_file, 'w') as f:
-            f.write(str(os.getpid()))
-        logger.info(f"✅ Текущий процесс PID {os.getpid()} записан в блокировку")
+        if result == 0:
+            logger.warning(f"⚠️ Порт {PORT} уже занят! Ждем 10 секунд...")
+            time.sleep(10)
+            # Повторная проверка
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            result = sock.connect_ex(('127.0.0.1', PORT))
+            sock.close()
+            if result == 0:
+                logger.error(f"❌ Порт {PORT} все еще занят! Продолжаем с риском...")
+            else:
+                logger.info(f"✅ Порт {PORT} освободился")
+        else:
+            logger.info(f"✅ Порт {PORT} свободен")
     except Exception as e:
-        logger.warning(f"⚠️ Ошибка в kill_old_process: {e}")
+        logger.warning(f"⚠️ Ошибка проверки порта: {e}")
 
-# Вызываем защиту при запуске
-kill_old_process()
+# Вызываем проверку порта
+check_port()
 
 # ========== ИНИЦИАЛИЗАЦИЯ БОТА ==========
 bot = Bot(token=BOT_TOKEN)
@@ -567,32 +566,26 @@ async def handle_unknown(message: types.Message):
 
 # ========== ЗАПУСК БОТА ==========
 async def main():
+    logger.info("=" * 50)
+    logger.info(f"🚀 ЗАПУСК ФИНАНСОВОГО БОТА v{VERSION}")
+    logger.info("=" * 50)
+    
+    # Просто удаляем вебхук, без лишних действий
     try:
-        logger.info("=" * 50)
-        logger.info(f"🚀 ЗАПУСК ФИНАНСОВОГО БОТА v{VERSION}")
-        logger.info("=" * 50)
-        
-        # Просто удаляем вебхук, без лишних действий
-        try:
-            await bot.delete_webhook(drop_pending_updates=True)
-            logger.info("✅ Вебхук удален")
-        except Exception as e:
-            logger.warning(f"⚠️ Ошибка при удалении вебхука: {e}")
-        
-        # Небольшая пауза
-        await asyncio.sleep(2)
-        
-        # Запускаем автопинг
-        ping_service.start()
-        
-        # Запускаем поллинг
-        logger.info("✅ Запуск polling...")
-        await dp.start_polling(bot)
-    finally:
-        # Удаляем файл блокировки при завершении
-        if os.path.exists("bot.lock"):
-            os.remove("bot.lock")
-            logger.info("✅ Файл блокировки удален")
+        await bot.delete_webhook(drop_pending_updates=True)
+        logger.info("✅ Вебхук удален")
+    except Exception as e:
+        logger.warning(f"⚠️ Ошибка при удалении вебхука: {e}")
+    
+    # Небольшая пауза
+    await asyncio.sleep(2)
+    
+    # Запускаем автопинг
+    ping_service.start()
+    
+    # Запускаем поллинг
+    logger.info("✅ Запуск polling...")
+    await dp.start_polling(bot)
 
 
 def run_fastapi():
@@ -603,6 +596,9 @@ def run_fastapi():
 
 if __name__ == "__main__":
     import threading
+    
+    # Проверяем порт перед запуском
+    check_port()
     
     # FastAPI в отдельном потоке
     fastapi_thread = threading.Thread(target=run_fastapi, daemon=True)
