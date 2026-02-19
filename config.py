@@ -13,8 +13,8 @@ PUBLIC_KEY = os.getenv("PUBLIC_KEY", "")
 
 # ========== НАСТРОЙКИ ==========
 LOCAL_EXCEL_PATH = "budget.xlsx"
-VERSION = "5.0"
+VERSION = "5.2"
 
-# ========== ДЛЯ АВТО-ПИНГА ==========
+# ========== ДЛЯ ВЕБ-СЕРВЕРА И ПИНГА ==========
 PORT = int(os.getenv("PORT", 10000))
 RENDER_URL = os.getenv("RENDER_URL", "https://family-finance-bot.onrender.com")
