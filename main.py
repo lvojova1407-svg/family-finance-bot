@@ -20,6 +20,8 @@ import uvicorn
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
+    MessageHandler,
+    filters,
     CommandHandler,
     CallbackQueryHandler,
     ContextTypes
@@ -631,3 +633,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
