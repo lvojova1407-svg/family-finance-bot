@@ -1,6 +1,6 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-Версия 5.2 - С ВЕБ-СЕРВЕРОМ ДЛЯ RENDER
+Версия 5.3 - С АВТОМАТИЧЕСКИМ ПЕРЕЗАПУСКОМ POLLING
 """
 
 import os
@@ -14,6 +14,7 @@ import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List
 
+import telegram.error
 from fastapi import FastAPI
 import uvicorn
 
@@ -548,9 +549,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-# ========== ЗАПУСК ТЕЛЕГРАМ БОТА ==========
+# ========== ЗАПУСК ТЕЛЕГРАМ БОТА С АВТОМАТИЧЕСКИМ ПЕРЕЗАПУСКОМ ==========
 async def start_bot():
-    """Запуск Telegram бота"""
+    """Запуск Telegram бота с автоматическим перезапуском polling"""
     global bot_app
     
     logger.info("🤖 Инициализация Telegram бота...")
@@ -564,29 +565,36 @@ async def start_bot():
         bot_app.add_handler(CommandHandler("help", help_command))
         bot_app.add_handler(CommandHandler("stats", stats_command))
         bot_app.add_handler(CommandHandler("ping", ping_command))
-        
-        # Добавляем обработчик inline-кнопок
         bot_app.add_handler(CallbackQueryHandler(button_callback))
-        
-        # Добавляем обработчик сообщений
         bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        
         logger.info("✅ Все обработчики добавлены")
         
         await bot_app.initialize()
         await bot_app.start()
         
-        await bot_app.updater.start_polling(
-            poll_interval=1.0,
-            timeout=20,
-            drop_pending_updates=True
-        )
-        
-        logger.info("✅ Telegram бот успешно запущен!")
-        return True
-        
+        # Запускаем polling в бесконечном цикле с перезапуском при ошибках
+        logger.info("🔄 Запуск polling...")
+        while True:
+            try:
+                await bot_app.updater.start_polling(
+                    poll_interval=1.0,
+                    timeout=20,
+                    drop_pending_updates=True,
+                    allowed_updates=["message", "callback_query"]
+                )
+                # Если polling успешно запущен, просто ждем
+                await asyncio.sleep(1)  # Небольшая пауза, чтобы не грузить CPU
+            except telegram.error.Conflict as e:
+                logger.warning(f"⚠️ Конфликт: {e}. Перезапуск через 5 секунд...")
+                await asyncio.sleep(5)
+                continue
+            except Exception as e:
+                logger.error(f"❌ Ошибка polling: {e}. Перезапуск через 10 секунд...")
+                await asyncio.sleep(10)
+                continue
+                
     except Exception as e:
-        logger.error(f"💥 Ошибка при запуске бота: {e}")
+        logger.error(f"💥 Критическая ошибка при запуске бота: {e}")
         return False
 
 
