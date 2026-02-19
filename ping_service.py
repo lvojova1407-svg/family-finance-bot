@@ -27,9 +27,13 @@ class PingService:
         url = f"{RENDER_URL.rstrip('/')}/ping"
         while self.running:
             try:
-                requests.get(url, timeout=5)
-            except:
-                pass
+                response = requests.get(url, timeout=5)
+                if response.status_code == 200:
+                    logger.info("✅ Пинг успешен")
+                else:
+                    logger.info(f"✅ Пинг (код {response.status_code})")
+            except Exception as e:
+                logger.debug(f"Пинг: {e}")
             time.sleep(180)
 
 ping_service = PingService()
