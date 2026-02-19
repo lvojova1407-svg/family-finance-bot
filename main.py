@@ -1,6 +1,6 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-Версия 3.0 - С ЗАЩИТОЙ ОТ КОНФЛИКТОВ ЧЕРЕЗ ПОРТ
+Версия 3.0 - МАКСИМАЛЬНАЯ ЗАЩИТА ОТ КОНФЛИКТОВ
 """
 
 import asyncio
@@ -8,10 +8,12 @@ import logging
 import re
 import time
 import os
+import signal
 import socket
 import sys
 from datetime import datetime, timezone, timedelta
 
+import psutil
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
@@ -32,32 +34,70 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ========== ЗАЩИТА ОТ ДВОЙНОГО ЗАПУСКА ЧЕРЕЗ ПОРТ ==========
-def check_port():
-    """Проверяет, не занят ли порт другим процессом"""
+
+# ========== МАКСИМАЛЬНАЯ ЗАЩИТА ОТ КОНФЛИКТОВ ==========
+def ensure_single_instance():
+    """Гарантирует, что работает только один экземпляр бота"""
     try:
+        current_pid = os.getpid()
+        logger.info(f"🔍 Текущий PID: {current_pid}")
+        
+        # 1. Проверка через файл блокировки
+        lock_file = "bot.lock"
+        if os.path.exists(lock_file):
+            try:
+                with open(lock_file, 'r') as f:
+                    old_pid = int(f.read().strip())
+                # Проверяем, жив ли процесс
+                if psutil.pid_exists(old_pid):
+                    logger.warning(f"⚠️ Найден живой процесс {old_pid}, убиваем...")
+                    try:
+                        os.kill(old_pid, signal.SIGTERM)
+                        time.sleep(3)
+                        # Если процесс еще жив, убиваем принудительно
+                        if psutil.pid_exists(old_pid):
+                            os.kill(old_pid, signal.SIGKILL)
+                            time.sleep(2)
+                    except ProcessLookupError:
+                        pass
+                    except Exception as e:
+                        logger.warning(f"⚠️ Ошибка при убийстве процесса: {e}")
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка чтения lock-файла: {e}")
+        
+        # 2. Проверка порта
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         result = sock.connect_ex(('127.0.0.1', PORT))
         sock.close()
         
         if result == 0:
-            logger.warning(f"⚠️ Порт {PORT} уже занят! Ждем 10 секунд...")
-            time.sleep(10)
+            logger.warning(f"⚠️ Порт {PORT} занят! Ждем 15 секунд...")
+            time.sleep(15)
+            
             # Повторная проверка
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             result = sock.connect_ex(('127.0.0.1', PORT))
             sock.close()
+            
             if result == 0:
-                logger.error(f"❌ Порт {PORT} все еще занят! Продолжаем с риском...")
+                logger.error(f"❌ Порт {PORT} все еще занят! Принудительно продолжаем...")
             else:
                 logger.info(f"✅ Порт {PORT} освободился")
         else:
             logger.info(f"✅ Порт {PORT} свободен")
+        
+        # 3. Записываем свой PID
+        with open(lock_file, 'w') as f:
+            f.write(str(current_pid))
+        logger.info(f"✅ PID {current_pid} записан в блокировку")
+        
     except Exception as e:
-        logger.warning(f"⚠️ Ошибка проверки порта: {e}")
+        logger.warning(f"⚠️ Ошибка в ensure_single_instance: {e}")
 
-# Вызываем проверку порта
-check_port()
+
+# Вызываем защиту при запуске
+ensure_single_instance()
+
 
 # ========== ИНИЦИАЛИЗАЦИЯ БОТА ==========
 bot = Bot(token=BOT_TOKEN)
@@ -597,15 +637,15 @@ def run_fastapi():
 if __name__ == "__main__":
     import threading
     
-    # Проверяем порт перед запуском
-    check_port()
+    # Максимальная защита от конфликтов
+    ensure_single_instance()
     
     # FastAPI в отдельном потоке
     fastapi_thread = threading.Thread(target=run_fastapi, daemon=True)
     fastapi_thread.start()
     
-    # Даем FastAPI время запуститься
-    time.sleep(2)
+    # Увеличенная пауза
+    time.sleep(5)
     
     # Бот в главном потоке
     asyncio.run(main())
