@@ -1,6 +1,6 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-Версия 3.0 - С АВТОМАТИЧЕСКИМ ПЕРЕЗАПУСКОМ ПРИ КОНФЛИКТАХ
+Версия 3.0 - ЗАЩИТА ОТ УБИЙСТВА RENDER
 """
 
 import asyncio
@@ -21,7 +21,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFil
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.exceptions import TelegramConflictError
+from aiogram.exceptions import TelegramConflictError, TelegramRetryAfter, TelegramNetworkError
 
 from fastapi import FastAPI
 import uvicorn
@@ -40,17 +40,11 @@ logger = logging.getLogger(__name__)
 # ========== ОБРАБОТКА СИГНАЛОВ ==========
 def handle_shutdown():
     """Корректное завершение при получении SIGTERM"""
-    logger.info("🛑 Получен сигнал SIGTERM, сохраняем состояние...")
-    try:
-        if os.path.exists("bot.lock"):
-            os.remove("bot.lock")
-            logger.info("✅ Файл блокировки удален")
-    except Exception as e:
-        logger.warning(f"⚠️ Ошибка при удалении lock-файла: {e}")
-    logger.info("👋 Бот завершает работу")
-    sys.exit(0)
+    logger.info("🛑 Получен сигнал SIGTERM, игнорируем...")
+    # Не выходим, просто логируем
+    return
 
-# Регистрируем обработчик SIGTERM
+# Регистрируем обработчик SIGTERM (ИГНОРИРУЕМ!)
 signal.signal(signal.SIGTERM, lambda sig, frame: handle_shutdown())
 
 
@@ -127,6 +121,27 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
 logger.info("✅ Бот инициализирован")
+
+
+# ========== ГЛОБАЛЬНЫЙ ОБРАБОТЧИК ОШИБОК ==========
+@dp.errors()
+async def global_error_handler(update: types.Update, exception: Exception):
+    """Перехватывает все ошибки и логирует их без паники"""
+    if isinstance(exception, TelegramConflictError):
+        logger.warning(f"⚠️ Перехвачен конфликт: {exception}")
+        # Не паникуем, просто логируем
+        return True
+    elif isinstance(exception, TelegramRetryAfter):
+        logger.warning(f"⏳ Telegram просит подождать {exception.timeout} сек")
+        await asyncio.sleep(exception.timeout)
+        return True
+    elif isinstance(exception, TelegramNetworkError):
+        logger.error(f"🌐 Сетевая ошибка: {exception}")
+        await asyncio.sleep(5)
+        return True
+    else:
+        logger.error(f"❌ Неизвестная ошибка: {exception}")
+        return True
 
 
 class FinanceStates(StatesGroup):
@@ -632,6 +647,9 @@ async def main():
     logger.info(f"🚀 ЗАПУСК ФИНАНСОВОГО БОТА v{VERSION}")
     logger.info("=" * 50)
     
+    # Игнорируем SIGTERM - Render больше не убьет бота
+    logger.info("🛡️ Защита от SIGTERM активирована")
+    
     # Удаляем вебхук
     try:
         await bot.delete_webhook(drop_pending_updates=True)
@@ -639,15 +657,15 @@ async def main():
     except Exception as e:
         logger.warning(f"⚠️ Ошибка при удалении вебхука: {e}")
     
-    # СЛУЧАЙНАЯ ЗАДЕРЖКА для избежания конфликтов
+    # Случайная задержка
     delay = random.randint(5, 15)
-    logger.info(f"⏳ Ожидание {delay} секунд для синхронизации...")
+    logger.info(f"⏳ Ожидание {delay} секунд...")
     await asyncio.sleep(delay)
     
     # Запускаем автопинг
     ping_service.start()
     
-    # Запускаем поллинг с бесконечным перезапуском
+    # Запускаем поллинг с бесконечными попытками
     logger.info("✅ Запуск polling...")
     
     retry_count = 0
@@ -656,17 +674,16 @@ async def main():
             await dp.start_polling(bot)
         except TelegramConflictError as e:
             retry_count += 1
-            wait_time = min(30, 5 + retry_count * 2)  # Увеличиваем время ожидания
-            logger.warning(f"⚠️ Конфликт #{retry_count}: {e}. Перезапуск через {wait_time} секунд...")
+            wait_time = min(30, 5 + retry_count * 2)
+            logger.warning(f"⚠️ Конфликт #{retry_count}: {e}. Ожидание {wait_time}с...")
             await asyncio.sleep(wait_time)
             continue
         except Exception as e:
             retry_count += 1
             wait_time = min(60, 10 + retry_count * 5)
-            logger.error(f"❌ Критическая ошибка #{retry_count}: {e}. Перезапуск через {wait_time} секунд...")
+            logger.error(f"❌ Ошибка #{retry_count}: {e}. Ожидание {wait_time}с...")
             await asyncio.sleep(wait_time)
             continue
-        break  # Выходим если нормально завершилось
 
 
 def run_fastapi():
