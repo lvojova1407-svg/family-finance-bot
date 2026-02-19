@@ -1,6 +1,6 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-Версия 4.0 - С МИНУТНЫМ ПИНГОМ
+Версия 4.0 - ИСПРАВЛЕННАЯ (БЕЗ УБИЙСТВА СИСТЕМНЫХ ПРОЦЕССОВ)
 """
 
 import os
@@ -33,7 +33,7 @@ from ping_service import ping_service
 
 # ========== БЕЗОПАСНОЕ УБИЙСТВО СТАРЫХ ПРОЦЕССОВ ==========
 def kill_old_processes():
-    """Убивает все старые процессы бота, сохраняя текущий"""
+    """Убивает только свои старые процессы, НЕ системные"""
     current_pid = os.getpid()
     print(f"🔍 Текущий PID: {current_pid}")
     
@@ -44,19 +44,19 @@ def kill_old_processes():
         
         killed = 0
         for line in lines:
-            # Ищем процессы с main.py
+            # Ищем ТОЛЬКО наши процессы (python с main.py)
             if 'python' in line and 'main.py' in line:
                 parts = line.split()
                 if len(parts) > 1:
                     try:
                         pid = int(parts[1])
-                        # Не убиваем текущий процесс
-                        if pid != current_pid:
+                        # Проверяем что PID > 100 (не системный) и не текущий
+                        if pid > 100 and pid != current_pid:
                             print(f"🔥 Найден старый процесс PID: {pid}")
                             os.kill(pid, signal.SIGKILL)
                             killed += 1
                             time.sleep(0.5)
-                    except (ValueError, IndexError):
+                    except (ValueError, IndexError, ProcessLookupError):
                         continue
         
         if killed > 0:
