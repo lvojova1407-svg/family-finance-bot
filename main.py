@@ -1,16 +1,17 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-Версия 4.0 - ПОЛНЫЙ ФУНКЦИОНАЛ + ЗАЩИТА ОТ СМЕРТИ
+Версия 4.0 - ПОЛНЫЙ ФУНКЦИОНАЛ + БЕЗОПАСНОЕ УБИЙСТВО ПРОЦЕССОВ
 """
 
+import os
+import sys
+import time
+import subprocess
+import signal
 import asyncio
 import logging
 import re
-import time
-import os
-import sys
 import threading
-import signal
 import random
 from datetime import datetime, timezone, timedelta
 
@@ -29,21 +30,58 @@ from config import BOT_TOKEN, VERSION, PORT, RENDER_URL, LOCAL_EXCEL_PATH
 from yandex_disk import add_expense, add_income, delete_last, download_from_yandex, get_statistics
 from ping_service import ping_service
 
+# ========== БЕЗОПАСНОЕ УБИЙСТВО СТАРЫХ ПРОЦЕССОВ ==========
+def kill_old_processes():
+    """Убивает все старые процессы бота, сохраняя текущий"""
+    current_pid = os.getpid()
+    print(f"🔍 Текущий PID: {current_pid}")
+    
+    try:
+        # Получаем список всех процессов
+        result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
+        lines = result.stdout.split('\n')
+        
+        killed = 0
+        for line in lines:
+            # Ищем процессы с main.py
+            if 'python' in line and 'main.py' in line:
+                parts = line.split()
+                if len(parts) > 1:
+                    try:
+                        pid = int(parts[1])
+                        # Не убиваем текущий процесс
+                        if pid != current_pid:
+                            print(f"🔥 Найден старый процесс PID: {pid}")
+                            os.kill(pid, signal.SIGKILL)
+                            killed += 1
+                            time.sleep(0.5)
+                    except (ValueError, IndexError):
+                        continue
+        
+        if killed > 0:
+            print(f"✅ Убито {killed} старых процессов")
+            time.sleep(2)
+        else:
+            print("✅ Старых процессов не найдено")
+            
+    except Exception as e:
+        print(f"⚠️ Ошибка при убийстве процессов: {e}")
+
+# Вызываем функцию убийства старых процессов
+kill_old_processes()
+
+# Создаем файл блокировки с текущим PID
+lock_file = "bot.lock"
+with open(lock_file, 'w') as f:
+    f.write(str(os.getpid()))
+print(f"✅ Файл блокировки создан (PID: {os.getpid()})")
+
+# ========== НАСТРОЙКА ЛОГГИРОВАНИЯ ==========
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-
-# ========== УБИВАЕМ ВСЕ СТАРЫЕ ПРОЦЕССЫ ==========
-current_pid = os.getpid()
-os.system("pkill -f 'python.*main.py' | true")
-os.system("pkill -f 'uvicorn' | true")
-with open("bot.lock", "w") as f:
-    f.write(str(current_pid))
-logger.info(f"🔥 Убиты все старые процессы")
-logger.info(f"✅ Текущий PID: {current_pid}")
 
 
 # ========== ИНИЦИАЛИЗАЦИЯ БОТА ==========
@@ -81,10 +119,12 @@ PAYMENT_METHODS = ["💵 Наличные", "💳 Карта Муж", "💳 Ка
 
 # ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 def get_moscow_time() -> str:
+    """Получить текущее время по Москве"""
     moscow_tz = timezone(timedelta(hours=3))
     return datetime.now(moscow_tz).strftime("%H:%M:%S")
 
 def get_current_date() -> str:
+    """Получить текущую дату"""
     return datetime.now(timezone(timedelta(hours=3))).strftime("%Y-%m-%d")
 
 
@@ -177,11 +217,12 @@ app = FastAPI(title="Family Finance Bot")
 @app.get("/health")
 @app.get("/ping")
 async def ping_endpoint():
+    """Универсальный эндпоинт для пинга"""
     return {
         "status": "alive",
         "time": get_moscow_time(),
         "date": get_current_date(),
-        "pid": current_pid
+        "pid": os.getpid()
     }
 
 
@@ -233,6 +274,7 @@ async def cmd_stats(message: types.Message):
 
 @dp.message(Command("ping"))
 async def cmd_ping(message: types.Message):
+    """Ручная проверка пинга"""
     await message.answer(f"🏓 Pong! Время: {get_moscow_time()}")
 
 
@@ -533,10 +575,10 @@ async def handle_unknown(message: types.Message):
     )
 
 
-# ========== ЗАПУСК ==========
+# ========== ЗАПУСК БОТА ==========
 async def main():
     logger.info("=" * 50)
-    logger.info(f"🚀 ЗАПУСК БОТА v{VERSION} (PID: {current_pid})")
+    logger.info(f"🚀 ЗАПУСК БОТА v{VERSION} (PID: {os.getpid()})")
     logger.info("=" * 50)
     
     try:
@@ -569,6 +611,7 @@ async def main():
 
 
 def run_fastapi():
+    """Запуск FastAPI в отдельном потоке"""
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="error")
 
 
