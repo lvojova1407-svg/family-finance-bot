@@ -217,6 +217,11 @@ def get_period_type_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 def get_calendar_keyboard(year: int, month: int, callback_prefix: str):
+if callback_prefix in ["stats_start", "stats_end", "stats_month", "stats_year"]:
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_period_type")])
+else:
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_main")])
+    
     """Генерирует клавиатуру-календарь"""
     keyboard = []
     
@@ -802,10 +807,18 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📊 <b>Сравнение периодов</b>\n\n"
                 f"Период 1: {start1} - {end1}\n"
                 f"Период 2: {start2} - {end2}\n\n{compare_text}",
-                reply_markup=get_stats_keyboard(),
-                parse_mode="HTML"
-            )
         
+        
+def compare_periods(start1: str, end1: str, start2: str, end2: str) -> str:
+    """
+    Сравнивает два периода
+    """
+    if not all([start1, end1, start2, end2]):
+        return "❌ Ошибка: не выбраны все даты"
+    
+    stats1 = get_statistics_period(start1, end1)
+    stats2 = get_statistics_period(start2, end2)
+                
         context.user_data.clear()
         return ConversationHandler.END
     
@@ -1170,8 +1183,12 @@ def compare_periods(start1: str, end1: str, start2: str, end2: str) -> str:
     """
     Сравнивает два периода
     """
+    if not all([start1, end1, start2, end2]):
+        return "❌ Ошибка: не выбраны все даты"
+    
     stats1 = get_statistics_period(start1, end1)
     stats2 = get_statistics_period(start2, end2)
+    
     
     # Парсим числа из статистики (упрощенно)
     def extract_balance(text):
@@ -1348,47 +1365,29 @@ def start_auto_ping():
     def ping_worker():
         time.sleep(30)
         
-        import socket
-        hostname = socket.gethostname()
-        
-        possible_urls = [
-            f"https://{hostname}.onrender.com",
-            os.getenv("RENDER_URL", "").rstrip('/'),
-        ]
-        
-        possible_urls = [url for url in possible_urls if url]
-        
-        logger.info(f"🧵 Авто-пинг запущен, пробуем URL: {possible_urls}")
-        
+        # Просто пингуем localhost, так как мы уже внутри сервера
         ping_count = 0
         while True:
             ping_count += 1
-            ping_success = False
+            try:
+                # Пингуем самого себя через localhost
+                response = requests.get(
+                    f"http://localhost:{PORT}/health", 
+                    timeout=5
+                )
+                if response.status_code == 200:
+                    logger.info(f"⚡ Пинг #{ping_count}: ✅ локальный")
+                else:
+                    logger.warning(f"⚡ Пинг #{ping_count}: ⚠️ код {response.status_code}")
+            except Exception as e:
+                logger.debug(f"⚡ Пинг #{ping_count}: {e}")
             
-            for url in possible_urls:
-                try:
-                    response = requests.get(
-                        f"{url}/health", 
-                        timeout=10,
-                        headers={"User-Agent": "Render-AutoPing/1.0"}
-                    )
-                    if response.status_code == 200:
-                        logger.info(f"⚡ Пинг #{ping_count}: ✅ {url}")
-                        ping_success = True
-                        break
-                except:
-                    continue
-            
-            if not ping_success:
-                logger.warning(f"⚡ Пинг #{ping_count}: ❌ все URL недоступны")
-            
-            time.sleep(300)  # 5 минут
+            time.sleep(240)  # 4 минуты
     
     thread = threading.Thread(target=ping_worker, daemon=True)
     thread.start()
     logger.info("✅ Поток авто-пинга создан")
     return thread
-
 # ================== FASTAPI ЭНДПОИНТЫ ==================
 app = FastAPI(title="Family Finance Bot")
 
@@ -1484,3 +1483,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
