@@ -1,6 +1,6 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-Версия 9.0 - С ПОСТОЯННОЙ АКТИВНОСТЬЮ
+Версия 9.1 - С НАДЕЖНОЙ АРХИТЕКТУРОЙ (как в проекте А)
 """
 
 import asyncio
@@ -12,14 +12,21 @@ import threading
 import time
 import random
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
+# Telegram (используем python-telegram-bot как в проекте А)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram.ext import (
+    Application, 
+    CommandHandler, 
+    CallbackQueryHandler, 
+    ContextTypes,
+    MessageHandler,
+    filters,
+    ConversationHandler
+)
 
+# FastAPI
 from fastapi import FastAPI
 import uvicorn
 import requests
@@ -27,39 +34,26 @@ import requests
 from config import BOT_TOKEN, VERSION, PORT, RENDER_URL, LOCAL_EXCEL_PATH
 from yandex_disk import add_expense, add_income, delete_last, download_from_yandex, get_statistics
 
+# Настройка логгирования
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
-
 
 # ========== FastAPI для Render ==========
 app = FastAPI(title="Family Finance Bot")
 
-@app.get("/")
-@app.get("/health")
-@app.get("/ping")
-async def health_check():
-    return {
-        "status": "alive",
-        "time": datetime.now().strftime("%H:%M:%S"),
-        "bot": "running"
-    }
+# Глобальные переменные
+bot_app: Optional[Application] = None
+startup_time = datetime.now(timezone.utc)
 
-
-# ========== ИНИЦИАЛИЗАЦИЯ БОТА ==========
-bot = Bot(token=BOT_TOKEN)
-storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
-
-logger.info("✅ Бот инициализирован")
-
-
-class FinanceStates(StatesGroup):
-    waiting_for_expense_amount = State()
-    waiting_for_income_amount = State()
-
+# Состояния для ConversationHandler
+(
+    WAITING_EXPENSE_AMOUNT, 
+    WAITING_INCOME_AMOUNT
+) = range(2)
 
 # ========== ДАННЫЕ ==========
 ALL_CATEGORIES = [
@@ -80,41 +74,44 @@ INCOME_SOURCES = ["💼 Зарплата (Жена)", "💼 Зарплата (М
 PAYERS = ["👩 Жена", "👨 Муж"]
 PAYMENT_METHODS = ["💵 Наличные", "💳 Карта Муж", "💳 Карта Жена", "📌 Другое"]
 
-
 # ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 def get_moscow_time() -> str:
+    """Получить текущее время по Москве"""
     moscow_tz = timezone(timedelta(hours=3))
     return datetime.now(moscow_tz).strftime("%H:%M:%S")
 
 def get_current_date() -> str:
+    """Получить текущую дату"""
     return datetime.now(timezone(timedelta(hours=3))).strftime("%Y-%m-%d")
-
 
 # ========== КЛАВИАТУРЫ ==========
 def get_main_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💰 Расход", callback_data="expense")],
-        [InlineKeyboardButton(text="💵 Доход", callback_data="income")],
-        [InlineKeyboardButton(text="❌ Удалить последнее", callback_data="delete_last")],
-        [InlineKeyboardButton(text="📊 Статистика и файлы", callback_data="stats_menu")]
-    ])
+    keyboard = [
+        [InlineKeyboardButton("💰 Расход", callback_data="expense")],
+        [InlineKeyboardButton("💵 Доход", callback_data="income")],
+        [InlineKeyboardButton("❌ Удалить последнее", callback_data="delete_last")],
+        [InlineKeyboardButton("📊 Статистика и файлы", callback_data="stats_menu")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
 def get_stats_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📥 Скачать Excel файл", callback_data="download_excel")],
-        [InlineKeyboardButton(text="📈 Статистика за период", callback_data="stats_period")],
-        [InlineKeyboardButton(text="💰 Расходы по категориям", callback_data="stats_categories")],
-        [InlineKeyboardButton(text="📊 Баланс", callback_data="stats_balance")],
-        [InlineKeyboardButton(text="🔙 Назад в главное меню", callback_data="back_main")]
-    ])
+    keyboard = [
+        [InlineKeyboardButton("📥 Скачать Excel файл", callback_data="download_excel")],
+        [InlineKeyboardButton("📈 Статистика за период", callback_data="stats_period")],
+        [InlineKeyboardButton("💰 Расходы по категориям", callback_data="stats_categories")],
+        [InlineKeyboardButton("📊 Баланс", callback_data="stats_balance")],
+        [InlineKeyboardButton("🔙 Назад в главное меню", callback_data="back_main")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
 def get_period_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📅 Текущий период (10-24)", callback_data="period_current")],
-        [InlineKeyboardButton(text="📅 Предыдущий период (25-9)", callback_data="period_previous")],
-        [InlineKeyboardButton(text="📅 За всё время", callback_data="period_all")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="stats_menu")]
-    ])
+    keyboard = [
+        [InlineKeyboardButton("📅 Текущий период (10-24)", callback_data="period_current")],
+        [InlineKeyboardButton("📅 Предыдущий период (25-9)", callback_data="period_previous")],
+        [InlineKeyboardButton("📅 За всё время", callback_data="period_all")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="stats_menu")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
 def get_categories_keyboard():
     keyboard = []
@@ -129,7 +126,7 @@ def get_categories_keyboard():
         keyboard.append([InlineKeyboardButton(text="📋 Другие категории...", callback_data="show_hidden_categories")])
     
     keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_main")])
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+    return InlineKeyboardMarkup(keyboard)
 
 def get_hidden_categories_keyboard():
     keyboard = []
@@ -141,12 +138,12 @@ def get_hidden_categories_keyboard():
         keyboard.append(row)
     
     keyboard.append([InlineKeyboardButton(text="🔙 Назад к основным категориям", callback_data="back_to_main_categories")])
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+    return InlineKeyboardMarkup(keyboard)
 
 def get_payers_keyboard():
     keyboard = [[InlineKeyboardButton(text=p, callback_data=f"payer_{p}")] for p in PAYERS]
     keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_categories")])
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+    return InlineKeyboardMarkup(keyboard)
 
 def get_payment_methods_keyboard():
     keyboard = []
@@ -157,34 +154,35 @@ def get_payment_methods_keyboard():
             row.append(InlineKeyboardButton(text=PAYMENT_METHODS[i + 1], callback_data=f"method_{PAYMENT_METHODS[i + 1]}"))
         keyboard.append(row)
     keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_payers")])
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+    return InlineKeyboardMarkup(keyboard)
 
 def get_income_sources_keyboard():
     keyboard = [[InlineKeyboardButton(text=s, callback_data=f"source_{s}")] for s in INCOME_SOURCES]
     keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_main")])
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+    return InlineKeyboardMarkup(keyboard)
 
 def get_delete_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
+    return InlineKeyboardMarkup([
         [InlineKeyboardButton(text="🗑 Удалить последний расход", callback_data="delete_expense")],
         [InlineKeyboardButton(text="🗑 Удалить последний доход", callback_data="delete_income")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="stats_menu")]
     ])
 
-
 # ========== ОБРАБОТЧИКИ КОМАНД ==========
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    user_name = message.from_user.first_name
-    await message.answer(
-        f"👋 <b>Добро пожаловать, {user_name}!</b>\n\n"
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /start"""
+    user = update.effective_user
+    logger.info(f"🚀 /start от {user.id}")
+    
+    await update.message.reply_text(
+        f"👋 <b>Добро пожаловать, {user.first_name}!</b>\n\n"
         f"👇 <b>Выберите действие:</b>",
         reply_markup=get_main_keyboard(),
         parse_mode="HTML"
     )
 
-@dp.message(Command("help"))
-async def cmd_help(message: types.Message):
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /help"""
     help_text = """
 <b>🤖 КАК ПОЛЬЗОВАТЬСЯ:</b>
 
@@ -208,245 +206,247 @@ async def cmd_help(message: types.Message):
 1. Нажмите "📊 Статистика и файлы"
 2. Выберите нужный пункт
     """
-    await message.answer(help_text, parse_mode="HTML")
+    await update.message.reply_text(help_text, parse_mode="HTML")
 
-@dp.message(Command("stats"))
-async def cmd_stats(message: types.Message):
-    await message.answer(
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /stats"""
+    await update.message.reply_text(
         "📊 <b>Меню статистики и файлов:</b>",
         reply_markup=get_stats_keyboard(),
         parse_mode="HTML"
     )
 
-@dp.message(Command("ping"))
-async def cmd_ping(message: types.Message):
-    await message.answer(f"🏓 Pong! Время: {get_moscow_time()}")
+async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /ping"""
+    await update.message.reply_text(f"🏓 Pong! Время: {get_moscow_time()}")
 
+async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /debug - проверка работы"""
+    user = update.effective_user
+    logger.info(f"🔍 /debug от {user.id}")
+    
+    response = (
+        f"🔧 Диагностика\n\n"
+        f"🤖 Бот: ✅\n"
+        f"🕐 {get_moscow_time()} · 📅 {get_current_date()}\n"
+        f"📊 Версия: {VERSION}"
+    )
+    
+    await update.message.reply_text(response)
 
 # ========== ОБРАБОТЧИКИ КОЛЛБЭКОВ ==========
-@dp.callback_query()
-async def process_callback(callback: types.CallbackQuery, state: FSMContext):
-    data = callback.data
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик нажатий на inline-кнопки"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    user_id = query.from_user.id
+    
+    logger.info(f"🔘 Кнопка: {data} от {user_id}")
     
     if data == "back_main":
-        await callback.message.edit_text(
+        await query.edit_message_text(
             "Выберите действие:",
             reply_markup=get_main_keyboard()
         )
-        await callback.answer()
     
     elif data == "stats_menu":
-        await callback.message.edit_text(
+        await query.edit_message_text(
             "📊 <b>Меню статистики и файлов:</b>\n\nВыберите нужный пункт:",
             reply_markup=get_stats_keyboard(),
             parse_mode="HTML"
         )
-        await callback.answer()
     
     elif data == "download_excel":
-        await callback.message.edit_text("⏬ Скачиваю файл с Яндекс.Диска...")
+        await query.edit_message_text("⏬ Скачиваю файл с Яндекс.Диска...")
         
         if download_from_yandex():
             try:
-                file_to_send = FSInputFile(LOCAL_EXCEL_PATH)
-                await callback.message.answer_document(
-                    file_to_send,
-                    caption="📁 Ваш файл budget.xlsx"
-                )
-                await callback.message.answer(
+                with open(LOCAL_EXCEL_PATH, "rb") as f:
+                    await context.bot.send_document(
+                        chat_id=query.message.chat_id,
+                        document=f,
+                        filename="budget.xlsx",
+                        caption="📁 Ваш файл budget.xlsx"
+                    )
+                await query.message.reply_text(
                     "Выберите действие:",
                     reply_markup=get_stats_keyboard()
                 )
             except Exception as e:
                 logger.error(f"Ошибка отправки файла: {e}")
-                await callback.message.answer(
+                await query.message.reply_text(
                     "❌ Ошибка при отправке файла",
                     reply_markup=get_stats_keyboard()
                 )
         else:
-            await callback.message.answer(
+            await query.message.reply_text(
                 "❌ Не удалось скачать файл с Яндекс.Диска",
                 reply_markup=get_stats_keyboard()
             )
-        await callback.answer()
     
     elif data == "stats_period":
-        await callback.message.edit_text(
+        await query.edit_message_text(
             "📅 <b>Выберите период:</b>",
             reply_markup=get_period_keyboard(),
             parse_mode="HTML"
         )
-        await callback.answer()
     
     elif data == "stats_categories":
-        await callback.message.edit_text("⏳ Считаю расходы по категориям...")
+        await query.edit_message_text("⏳ Считаю расходы по категориям...")
         stats_text = get_statistics(by_categories=True)
-        await callback.message.edit_text(
+        await query.edit_message_text(
             f"📊 <b>Расходы по категориям:</b>\n\n{stats_text}",
             reply_markup=get_stats_keyboard(),
             parse_mode="HTML"
         )
-        await callback.answer()
     
     elif data == "stats_balance":
-        await callback.message.edit_text("⏳ Считаю баланс...")
+        await query.edit_message_text("⏳ Считаю баланс...")
         balance_text = get_statistics(balance=True)
-        await callback.message.edit_text(
+        await query.edit_message_text(
             f"💰 <b>Текущий баланс:</b>\n\n{balance_text}",
             reply_markup=get_stats_keyboard(),
             parse_mode="HTML"
         )
-        await callback.answer()
     
     elif data == "period_current":
-        await callback.message.edit_text("⏳ Считаю статистику за текущий период...")
+        await query.edit_message_text("⏳ Считаю статистику за текущий период...")
         stats_text = get_statistics(period="current")
-        await callback.message.edit_text(
+        await query.edit_message_text(
             f"📊 <b>Статистика за текущий период (10-24):</b>\n\n{stats_text}",
             reply_markup=get_stats_keyboard(),
             parse_mode="HTML"
         )
-        await callback.answer()
     
     elif data == "period_previous":
-        await callback.message.edit_text("⏳ Считаю статистику за предыдущий период...")
+        await query.edit_message_text("⏳ Считаю статистику за предыдущий период...")
         stats_text = get_statistics(period="previous")
-        await callback.message.edit_text(
+        await query.edit_message_text(
             f"📊 <b>Статистика за предыдущий период (25-9):</b>\n\n{stats_text}",
             reply_markup=get_stats_keyboard(),
             parse_mode="HTML"
         )
-        await callback.answer()
     
     elif data == "period_all":
-        await callback.message.edit_text("⏳ Считаю статистику за всё время...")
+        await query.edit_message_text("⏳ Считаю статистику за всё время...")
         stats_text = get_statistics(period="all")
-        await callback.message.edit_text(
+        await query.edit_message_text(
             f"📊 <b>Статистика за всё время:</b>\n\n{stats_text}",
             reply_markup=get_stats_keyboard(),
             parse_mode="HTML"
         )
-        await callback.answer()
     
     elif data == "expense":
-        await callback.message.edit_text(
+        await query.edit_message_text(
             "📌 <b>Выберите категорию расхода:</b>",
             reply_markup=get_categories_keyboard(),
             parse_mode="HTML"
         )
-        await callback.answer()
     
     elif data == "show_hidden_categories":
-        await callback.message.edit_text(
+        await query.edit_message_text(
             "📌 <b>Дополнительные категории:</b>",
             reply_markup=get_hidden_categories_keyboard(),
             parse_mode="HTML"
         )
-        await callback.answer()
     
     elif data == "back_to_main_categories":
-        await callback.message.edit_text(
+        await query.edit_message_text(
             "📌 <b>Выберите категорию расхода:</b>",
             reply_markup=get_categories_keyboard(),
             parse_mode="HTML"
         )
-        await callback.answer()
     
     elif data == "back_to_categories":
-        await callback.message.edit_text(
+        await query.edit_message_text(
             "📌 <b>Выберите категорию расхода:</b>",
             reply_markup=get_categories_keyboard(),
             parse_mode="HTML"
         )
-        await callback.answer()
     
     elif data.startswith("cat_"):
         category = data[4:]
-        await state.update_data(category=category)
-        await callback.message.edit_text(
+        context.user_data["category"] = category
+        await query.edit_message_text(
             "👤 <b>Кто платил?</b>",
             reply_markup=get_payers_keyboard(),
             parse_mode="HTML"
         )
-        await callback.answer()
     
     elif data.startswith("payer_"):
         payer = data[6:]
-        await state.update_data(payer=payer)
-        await callback.message.edit_text(
+        context.user_data["payer"] = payer
+        await query.edit_message_text(
             "💳 <b>Способ оплаты:</b>",
             reply_markup=get_payment_methods_keyboard(),
             parse_mode="HTML"
         )
-        await callback.answer()
     
     elif data == "back_to_payers":
-        await callback.message.edit_text(
+        await query.edit_message_text(
             "👤 <b>Кто платил?</b>",
             reply_markup=get_payers_keyboard(),
             parse_mode="HTML"
         )
-        await callback.answer()
     
     elif data.startswith("method_"):
         method = data[7:]
-        await state.update_data(method=method)
-        await state.set_state(FinanceStates.waiting_for_expense_amount)
-        await callback.message.edit_text(
+        context.user_data["method"] = method
+        context.user_data["waiting_for"] = "expense"
+        await query.edit_message_text(
             "💰 <b>Введите сумму расхода</b>\n(только цифры, например: 1500)",
             parse_mode="HTML"
         )
-        await callback.answer()
+        return WAITING_EXPENSE_AMOUNT
     
     elif data == "income":
-        await callback.message.edit_text(
+        await query.edit_message_text(
             "💵 <b>Выберите источник дохода:</b>",
             reply_markup=get_income_sources_keyboard(),
             parse_mode="HTML"
         )
-        await callback.answer()
     
     elif data.startswith("source_"):
         source = data[7:]
-        await state.update_data(source=source)
-        await state.set_state(FinanceStates.waiting_for_income_amount)
-        await callback.message.edit_text(
+        context.user_data["source"] = source
+        context.user_data["waiting_for"] = "income"
+        await query.edit_message_text(
             "💰 <b>Введите сумму дохода</b>\n(только цифры, например: 50000)",
             parse_mode="HTML"
         )
-        await callback.answer()
+        return WAITING_INCOME_AMOUNT
     
     elif data == "delete_last":
-        await callback.message.edit_text(
+        await query.edit_message_text(
             "❓ <b>Что удалить?</b>",
             reply_markup=get_delete_keyboard(),
             parse_mode="HTML"
         )
-        await callback.answer()
     
     elif data == "delete_expense":
         result = delete_last("Расходы")
-        await callback.message.answer(result)
-        await callback.message.answer(
+        await query.message.reply_text(result)
+        await query.message.reply_text(
             "Выберите действие:",
             reply_markup=get_stats_keyboard()
         )
-        await callback.answer()
     
     elif data == "delete_income":
         result = delete_last("Доходы")
-        await callback.message.answer(result)
-        await callback.message.answer(
+        await query.message.reply_text(result)
+        await query.message.reply_text(
             "Выберите действие:",
             reply_markup=get_stats_keyboard()
         )
-        await callback.answer()
-
+    
+    return ConversationHandler.END
 
 # ========== ОБРАБОТЧИКИ СООБЩЕНИЙ ==========
-@dp.message(FinanceStates.waiting_for_expense_amount)
-async def process_expense_amount(message: types.Message, state: FSMContext):
-    text = message.text.strip()
+async def handle_expense_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик ввода суммы расхода"""
+    text = update.message.text.strip()
     amount_str = re.sub(r"[^\d.,]", "", text).replace(",", ".")
     
     try:
@@ -454,33 +454,34 @@ async def process_expense_amount(message: types.Message, state: FSMContext):
         if amount <= 0 or amount > 1_000_000:
             raise ValueError
     except ValueError:
-        await message.answer("❌ Введите корректное число (от 1 до 1 000 000):")
-        return
+        await update.message.reply_text("❌ Введите корректное число (от 1 до 1 000 000):")
+        return WAITING_EXPENSE_AMOUNT
     
-    data = await state.get_data()
-    category = data.get("category")
-    payer = data.get("payer")
-    method = data.get("method")
+    category = context.user_data.get("category")
+    payer = context.user_data.get("payer")
+    method = context.user_data.get("method")
     
     if not all([category, payer, method]):
-        await message.answer(
+        await update.message.reply_text(
             "❌ Ошибка сессии. Начните заново.",
             reply_markup=get_main_keyboard()
         )
-        await state.clear()
-        return
+        context.user_data.clear()
+        return ConversationHandler.END
     
     result = add_expense(category, amount, payer, method)
-    await message.answer(result)
-    await message.answer(
+    await update.message.reply_text(result)
+    await update.message.reply_text(
         "👇 Выберите следующее действие:",
         reply_markup=get_main_keyboard()
     )
-    await state.clear()
+    
+    context.user_data.clear()
+    return ConversationHandler.END
 
-@dp.message(FinanceStates.waiting_for_income_amount)
-async def process_income_amount(message: types.Message, state: FSMContext):
-    text = message.text.strip()
+async def handle_income_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик ввода суммы дохода"""
+    text = update.message.text.strip()
     amount_str = re.sub(r"[^\d.,]", "", text).replace(",", ".")
     
     try:
@@ -488,94 +489,242 @@ async def process_income_amount(message: types.Message, state: FSMContext):
         if amount <= 0 or amount > 10_000_000:
             raise ValueError
     except ValueError:
-        await message.answer("❌ Введите корректное число (от 1 до 10 000 000):")
-        return
+        await update.message.reply_text("❌ Введите корректное число (от 1 до 10 000 000):")
+        return WAITING_INCOME_AMOUNT
     
-    data = await state.get_data()
-    source = data.get("source")
+    source = context.user_data.get("source")
     
     if not source:
-        await message.answer(
+        await update.message.reply_text(
             "❌ Ошибка сессии. Начните заново.",
             reply_markup=get_main_keyboard()
         )
-        await state.clear()
-        return
+        context.user_data.clear()
+        return ConversationHandler.END
     
     payer = "Муж" if "Муж" in source else "Жена"
     result = add_income(source, amount, payer)
     
-    await message.answer(result)
-    await message.answer(
+    await update.message.reply_text(result)
+    await update.message.reply_text(
         "👇 Выберите следующее действие:",
         reply_markup=get_main_keyboard()
     )
-    await state.clear()
+    
+    context.user_data.clear()
+    return ConversationHandler.END
 
-@dp.message()
-async def handle_unknown(message: types.Message):
-    await message.answer(
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отмена действия"""
+    await update.message.reply_text(
+        "Действие отменено",
+        reply_markup=get_main_keyboard()
+    )
+    context.user_data.clear()
+    return ConversationHandler.END
+
+async def handle_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик неизвестных сообщений"""
+    await update.message.reply_text(
         "❓ Используйте кнопки меню 👇",
         reply_markup=get_main_keyboard()
     )
 
+# ================== ЗАПУСК ТЕЛЕГРАМ БОТА ==================
+async def setup_bot_commands(application: Application):
+    """Установка команд для меню Telegram"""
+    commands = [
+        BotCommand("start", "🏠 Главное меню"),
+        BotCommand("stats", "📊 Статистика"),
+        BotCommand("help", "❓ Помощь"),
+        BotCommand("ping", "🏓 Проверка"),
+        BotCommand("debug", "🔧 Диагностика"),
+    ]
+    await application.bot.set_my_commands(commands)
+    logger.info("✅ Команды меню установлены")
 
-# ========== ЗАПУСК FASTAPI ==========
-def run_fastapi():
-    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="error")
-
-
-# ========== АКТИВНОСТЬ ДЛЯ RENDER ==========
-async def keep_alive():
-    """Постоянная активность, чтобы Render не убил процесс"""
-    while True:
-        try:
-            # Каждые 30 секунд делаем запрос к Telegram API
-            await bot.get_me()
-            logger.debug("💓 Keep-alive ping to Telegram")
-        except Exception as e:
-            logger.debug(f"Keep-alive error: {e}")
-        
-        # Каждые 30 секунд
-        await asyncio.sleep(30)
-
-
-# ========== ОСНОВНАЯ ФУНКЦИЯ ==========
-async def main():
-    logger.info("=" * 50)
-    logger.info(f"🚀 ЗАПУСК БОТА v{VERSION}")
-    logger.info("=" * 50)
+async def start_bot():
+    """Запуск Telegram бота"""
+    global bot_app
     
-    # Запускаем FastAPI в фоне
-    fastapi_thread = threading.Thread(target=run_fastapi, daemon=True)
-    fastapi_thread.start()
-    logger.info(f"🌍 FastAPI запущен на порту {PORT}")
+    logger.info("🤖 Инициализация Telegram бота...")
     
-    # Небольшая пауза
-    await asyncio.sleep(2)
+    await asyncio.sleep(5)
     
-    # Удаляем вебхук
     try:
-        await bot.delete_webhook(drop_pending_updates=True)
-        logger.info("✅ Вебхук удален")
+        bot_app = Application.builder().token(BOT_TOKEN).build()
+        logger.info("✅ Приложение создано")
+        
+        # Устанавливаем команды меню
+        await setup_bot_commands(bot_app)
+        
+        # Создаем ConversationHandler для расходов и доходов
+        expense_conv = ConversationHandler(
+            entry_points=[CallbackQueryHandler(button_callback, pattern="^method_")],
+            states={
+                WAITING_EXPENSE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_amount)]
+            },
+            fallbacks=[CommandHandler("cancel", cancel)]
+        )
+        
+        income_conv = ConversationHandler(
+            entry_points=[CallbackQueryHandler(button_callback, pattern="^source_")],
+            states={
+                WAITING_INCOME_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_income_amount)]
+            },
+            fallbacks=[CommandHandler("cancel", cancel)]
+        )
+        
+        # Добавляем обработчики команд
+        bot_app.add_handler(CommandHandler("start", start_command))
+        bot_app.add_handler(CommandHandler("help", help_command))
+        bot_app.add_handler(CommandHandler("stats", stats_command))
+        bot_app.add_handler(CommandHandler("ping", ping_command))
+        bot_app.add_handler(CommandHandler("debug", debug_command))
+        bot_app.add_handler(CommandHandler("cancel", cancel))
+        
+        # Добавляем ConversationHandler
+        bot_app.add_handler(expense_conv)
+        bot_app.add_handler(income_conv)
+        
+        # Добавляем обработчик inline-кнопок (для всех остальных callback)
+        bot_app.add_handler(CallbackQueryHandler(button_callback))
+        
+        # Добавляем обработчик неизвестных сообщений
+        bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_unknown))
+        
+        logger.info("✅ Все обработчики добавлены")
+        
+        await bot_app.initialize()
+        await bot_app.start()
+        
+        await bot_app.updater.start_polling(
+            poll_interval=1.0,
+            timeout=20,
+            drop_pending_updates=True
+        )
+        
+        logger.info("✅ Telegram бот успешно запущен!")
+        return True
+        
     except Exception as e:
-        logger.warning(f"⚠️ Ошибка удаления вебхука: {e}")
+        logger.error(f"💥 Ошибка при запуске бота: {e}")
+        return False
+
+# ================== АВТО-ПИНГ ==================
+def start_auto_ping():
+    """Запускает авто-пинг в отдельном потоке (как в проекте А)"""
+    def ping_worker():
+        time.sleep(30)
+        url = f"{RENDER_URL.rstrip('/')}"
+        logger.info(f"🧵 Авто-пинг запущен для {url}")
+        
+        ping_count = 0
+        while True:
+            ping_count += 1
+            try:
+                # Пингуем health-эндпоинт
+                response = requests.get(f"{url}/health", timeout=10)
+                if response.status_code == 200:
+                    logger.info(f"✅ Авто-пинг #{ping_count} успешен")
+                else:
+                    logger.warning(f"⚠️ Авто-пинг #{ping_count}: код {response.status_code}")
+            except Exception as e:
+                logger.error(f"❌ Ошибка авто-пинга #{ping_count}: {e}")
+            
+            # Пинг каждые 8 минут (480 секунд) - как в проекте А
+            time.sleep(480)
     
-    # Запускаем keep-alive в фоне
-    asyncio.create_task(keep_alive())
-    logger.info("✅ Keep-alive запущен (каждые 30 секунд)")
+    thread = threading.Thread(target=ping_worker, daemon=True)
+    thread.start()
+    logger.info("✅ Поток авто-пинга создан")
+    return thread
+
+# ================== FASTAPI ЭНДПОИНТЫ ==================
+@app.get("/")
+@app.get("/health")
+@app.get("/ping")
+async def health_check():
+    """Health check для Render"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "bot_running": bool(bot_app),
+        "time_moscow": get_moscow_time(),
+        "version": VERSION
+    }
+
+@app.get("/status")
+async def status():
+    """Статус системы"""
+    return {
+        "server": {
+            "uptime": str(datetime.now(timezone.utc) - startup_time),
+            "port": PORT,
+            "startup_time": startup_time.isoformat()
+        },
+        "bot": {
+            "initialized": bool(bot_app),
+            "version": VERSION
+        }
+    }
+
+# ================== ЗАПУСК ПРИЛОЖЕНИЯ ==================
+@app.on_event("startup")
+async def startup_event():
+    """Запуск при старте приложения"""
+    logger.info("=" * 60)
+    logger.info(f"🚀 ЗАПУСК ФИНАНСОВОГО БОТА v{VERSION}")
+    logger.info("=" * 60)
+    
+    logger.info(f"✅ Токен бота: Найден")
+    logger.info(f"⏰ Время по Москве: {get_moscow_time()}")
+    logger.info(f"📅 Дата: {get_current_date()}")
+    logger.info(f"🌐 Порт: {PORT}")
+    logger.info(f"🌍 Render URL: {RENDER_URL}")
+    logger.info("=" * 60)
+    
+    # Запускаем авто-пинг (как в проекте А)
+    start_auto_ping()
+    logger.info("🔧 Авто-пинг запущен (пинг каждые 8 минут)")
     
     # Запускаем бота
-    logger.info("✅ Запуск polling...")
-    await dp.start_polling(bot)
+    success = await start_bot()
+    
+    if success:
+        logger.info("🎉 Все системы запущены и готовы к работе!")
+    else:
+        logger.error("💥 Не удалось запустить бота!")
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Остановка при завершении"""
+    logger.info("🛑 Завершение работы...")
+    
+    if bot_app:
+        try:
+            await bot_app.updater.stop()
+            await bot_app.stop()
+            await bot_app.shutdown()
+            logger.info("✅ Telegram бот остановлен")
+        except Exception as e:
+            logger.error(f"❌ Ошибка при остановке бота: {e}")
+    
+    logger.info("👋 Сервер остановлен")
+
+# ================== ТОЧКА ВХОДА ==================
+def main():
+    """Основная функция запуска"""
+    logger.info(f"🌍 Запуск сервера на порту {PORT}...")
+    
+    uvicorn.run(
+        "main:app",  # Важно: используем строковый импорт
+        host="0.0.0.0",
+        port=PORT,
+        access_log=False,
+        log_level="info",
+        reload=False  # Отключаем reload для продакшена
+    )
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("👋 Бот остановлен")
-    except Exception as e:
-        logger.error(f"❌ Критическая ошибка: {e}")
-        # Не перезапускаемся, чтобы Render не видел ошибок
-        time.sleep(3600)  # Просто ждем час
+    main()
