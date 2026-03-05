@@ -555,6 +555,22 @@ async def start_bot():
         bot_app = Application.builder().token(BOT_TOKEN).build()
         logger.info("✅ Приложение создано")
         
+        # === ВАЖНО: Принудительно завершаем предыдущие сессии ===
+        try:
+            # Сначала удаляем вебхук (на всякий случай)
+            await bot_app.bot.delete_webhook(drop_pending_updates=True)
+            logger.info("✅ Вебхук удален")
+            
+            # Получаем информацию о боте
+            bot_info = await bot_app.bot.get_me()
+            logger.info(f"✅ Бот: @{bot_info.username}")
+            
+            # Дополнительная проверка - закрываем все активные сессии
+            await asyncio.sleep(2)  # Даем время на закрытие
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка при очистке: {e}")
+        
         # Устанавливаем команды меню
         await setup_bot_commands(bot_app)
         
@@ -564,7 +580,8 @@ async def start_bot():
             states={
                 WAITING_EXPENSE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_amount)]
             },
-            fallbacks=[CommandHandler("cancel", cancel)]
+            fallbacks=[CommandHandler("cancel", cancel)],
+            per_message=False  # Добавляем этот параметр
         )
         
         income_conv = ConversationHandler(
@@ -572,7 +589,8 @@ async def start_bot():
             states={
                 WAITING_INCOME_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_income_amount)]
             },
-            fallbacks=[CommandHandler("cancel", cancel)]
+            fallbacks=[CommandHandler("cancel", cancel)],
+            per_message=False  # Добавляем этот параметр
         )
         
         # Добавляем обработчики команд
@@ -598,10 +616,14 @@ async def start_bot():
         await bot_app.initialize()
         await bot_app.start()
         
+        # === ВАЖНО: Добавляем задержку перед запуском polling ===
+        await asyncio.sleep(3)
+        
         await bot_app.updater.start_polling(
             poll_interval=1.0,
             timeout=20,
-            drop_pending_updates=True
+            drop_pending_updates=True,  # Важно!
+            allowed_updates=['message', 'callback_query']  # Ограничиваем типы обновлений
         )
         
         logger.info("✅ Telegram бот успешно запущен!")
@@ -610,30 +632,51 @@ async def start_bot():
     except Exception as e:
         logger.error(f"💥 Ошибка при запуске бота: {e}")
         return False
-
+        
 # ================== АВТО-ПИНГ ==================
 def start_auto_ping():
-    """Запускает авто-пинг в отдельном потоке (как в проекте А)"""
+    """Запускает авто-пинг в отдельном потоке"""
     def ping_worker():
-        time.sleep(30)
-        url = f"{RENDER_URL.rstrip('/')}"
-        logger.info(f"🧵 Авто-пинг запущен для {url}")
+        time.sleep(60)  # Увеличиваем задержку до 60 секунд
+        
+        # Пытаемся получить реальный URL
+        import socket
+        hostname = socket.gethostname()
+        
+        # Пробуем разные варианты URL
+        possible_urls = [
+            f"https://{hostname}.onrender.com",
+            os.getenv("RENDER_URL", "").rstrip('/'),
+            "https://family-finance-bot-c2b7.onrender.com",  # Текущий реальный URL
+        ]
+        
+        # Убираем пустые
+        possible_urls = [url for url in possible_urls if url]
+        
+        logger.info(f"🧵 Авто-пинг запущен, пробуем URL: {possible_urls}")
         
         ping_count = 0
         while True:
             ping_count += 1
-            try:
-                # Пингуем health-эндпоинт
-                response = requests.get(f"{url}/health", timeout=10)
-                if response.status_code == 200:
-                    logger.info(f"✅ Авто-пинг #{ping_count} успешен")
-                else:
-                    logger.warning(f"⚠️ Авто-пинг #{ping_count}: код {response.status_code}")
-            except Exception as e:
-                logger.error(f"❌ Ошибка авто-пинга #{ping_count}: {e}")
             
-            # Пинг каждые 8 минут (480 секунд) - как в проекте А
-            time.sleep(480)
+            for url in possible_urls:
+                try:
+                    response = requests.get(
+                        f"{url}/health", 
+                        timeout=15,
+                        headers={"User-Agent": "Render-AutoPing/1.0"}
+                    )
+                    if response.status_code == 200:
+                        logger.info(f"✅ Авто-пинг #{ping_count} успешен для {url}")
+                        break
+                except Exception as e:
+                    logger.debug(f"Пинг #{ping_count} для {url} не удался: {e}")
+                    continue
+            else:
+                logger.warning(f"⚠️ Авто-пинг #{ping_count}: все URL недоступны")
+            
+            # Пинг каждые 5 минут
+            time.sleep(300)
     
     thread = threading.Thread(target=ping_worker, daemon=True)
     thread.start()
@@ -728,4 +771,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
