@@ -217,11 +217,6 @@ def get_period_type_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 def get_calendar_keyboard(year: int, month: int, callback_prefix: str):
-if callback_prefix in ["stats_start", "stats_end", "stats_month", "stats_year"]:
-    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_period_type")])
-else:
-    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_main")])
-    
     """Генерирует клавиатуру-календарь"""
     keyboard = []
     
@@ -257,8 +252,29 @@ else:
     # Кнопка "Сегодня"
     today = get_current_date_obj()
     keyboard.append([InlineKeyboardButton("📅 Сегодня", callback_data=f"{callback_prefix}_date_{format_date(today)}")])
-    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_period_type")])
     
+    # Кнопка назад (с правильным контекстом)
+    if callback_prefix in ["stats_start", "stats_end", "stats_month", "stats_year"]:
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_period_type")])
+    elif callback_prefix in ["compare1_start", "compare1_end", "compare2_start", "compare2_end"]:
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="stats_compare")])
+    else:
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_main")])
+    
+    return InlineKeyboardMarkup(keyboard)
+
+def get_year_keyboard(callback_prefix: str):
+    """Клавиатура выбора года"""
+    current_year = get_current_date_obj().year
+    keyboard = []
+    
+    for year in range(current_year - 2, current_year + 3):
+        if year == current_year:
+            keyboard.append([InlineKeyboardButton(f"👉 {year} 👈", callback_data=f"{callback_prefix}_{year}")])
+        else:
+            keyboard.append([InlineKeyboardButton(str(year), callback_data=f"{callback_prefix}_{year}")])
+    
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_period_type")])
     return InlineKeyboardMarkup(keyboard)
 
 def get_delete_keyboard():
@@ -268,10 +284,6 @@ def get_delete_keyboard():
         [InlineKeyboardButton(text="🗑 Последний доход", callback_data="delete_income")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="stats_menu")]
     ])
-
-def get_ignore_keyboard():
-    """Пустая клавиатура для игнорируемых кнопок"""
-    return InlineKeyboardMarkup([[]])
 
 # ========== ОБРАБОТЧИКИ КОМАНД ==========
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -612,6 +624,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=get_stats_keyboard(),
                 parse_mode="HTML"
             )
+            context.user_data.clear()
         return ConversationHandler.END
     
     elif data.startswith("stats_end_month_"):
@@ -657,6 +670,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=get_stats_keyboard(),
                 parse_mode="HTML"
             )
+            context.user_data.clear()
         return ConversationHandler.END
     
     elif data.startswith("stats_month_month_"):
@@ -695,6 +709,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=get_stats_keyboard(),
             parse_mode="HTML"
         )
+        context.user_data.clear()
         return ConversationHandler.END
     
     # ===== СРАВНЕНИЕ ПЕРИОДОВ =====
@@ -800,25 +815,24 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         end1 = context.user_data.get("compare_end1")
         start2 = context.user_data.get("compare_start2")
         
-        if all([start1, end1, start2, end2]):
-            await query.edit_message_text("⏳ Сравниваю периоды...")
-            compare_text = compare_periods(start1, end1, start2, end2)
+        if not all([start1, end1, start2, end2]):
             await query.edit_message_text(
-                f"📊 <b>Сравнение периодов</b>\n\n"
-                f"Период 1: {start1} - {end1}\n"
-                f"Период 2: {start2} - {end2}\n\n{compare_text}",
+                "❌ Ошибка: не выбраны все даты",
+                reply_markup=get_stats_keyboard()
+            )
+            context.user_data.clear()
+            return ConversationHandler.END
         
+        await query.edit_message_text("⏳ Сравниваю периоды...")
+        compare_text = compare_periods(start1, end1, start2, end2)
+        await query.edit_message_text(
+            f"📊 <b>Сравнение периодов</b>\n\n"
+            f"Период 1: {start1} - {end1}\n"
+            f"Период 2: {start2} - {end2}\n\n{compare_text}",
+            reply_markup=get_stats_keyboard(),
+            parse_mode="HTML"
+        )
         
-def compare_periods(start1: str, end1: str, start2: str, end2: str) -> str:
-    """
-    Сравнивает два периода
-    """
-    if not all([start1, end1, start2, end2]):
-        return "❌ Ошибка: не выбраны все даты"
-    
-    stats1 = get_statistics_period(start1, end1)
-    stats2 = get_statistics_period(start2, end2)
-                
         context.user_data.clear()
         return ConversationHandler.END
     
@@ -912,20 +926,6 @@ def compare_periods(start1: str, end1: str, start2: str, end2: str) -> str:
     
     return ConversationHandler.END
 
-def get_year_keyboard(callback_prefix: str):
-    """Клавиатура выбора года"""
-    current_year = get_current_date_obj().year
-    keyboard = []
-    
-    for year in range(current_year - 2, current_year + 3):
-        if year == current_year:
-            keyboard.append([InlineKeyboardButton(f"👉 {year} 👈", callback_data=f"{callback_prefix}_{year}")])
-        else:
-            keyboard.append([InlineKeyboardButton(str(year), callback_data=f"{callback_prefix}_{year}")])
-    
-    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_period_type")])
-    return InlineKeyboardMarkup(keyboard)
-
 # ========== ОБРАБОТЧИКИ СООБЩЕНИЙ ==========
 async def handle_expense_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик ввода суммы расхода (текущая дата)"""
@@ -991,7 +991,7 @@ async def handle_archive_expense_amount(update: Update, context: ContextTypes.DE
     # Здесь нужно модифицировать add_expense для приема даты
     # Пока используем стандартную функцию
     result = add_expense(category, amount, payer, method)
-    await update.message.reply_text(f"{result} (дата: {archive_date})")
+    await update.message.reply_text(f"✅ {result} (дата: {archive_date})")
     await update.message.reply_text(
         "👇 Выберите следующее действие:",
         reply_markup=get_main_keyboard()
@@ -1062,7 +1062,7 @@ async def handle_archive_income_amount(update: Update, context: ContextTypes.DEF
     payer = "Муж" if "Муж" in source else "Жена"
     result = add_income(source, amount, payer)
     
-    await update.message.reply_text(f"{result} (дата: {archive_date})")
+    await update.message.reply_text(f"✅ {result} (дата: {archive_date})")
     await update.message.reply_text(
         "👇 Выберите следующее действие:",
         reply_markup=get_main_keyboard()
@@ -1189,8 +1189,7 @@ def compare_periods(start1: str, end1: str, start2: str, end2: str) -> str:
     stats1 = get_statistics_period(start1, end1)
     stats2 = get_statistics_period(start2, end2)
     
-    
-    # Парсим числа из статистики (упрощенно)
+    # Парсим числа из статистики
     def extract_balance(text):
         import re
         match = re.search(r'Баланс: ([\d\s,]+) ₽', text)
@@ -1361,11 +1360,10 @@ async def start_bot():
 
 # ================== АВТО-ПИНГ ==================
 def start_auto_ping():
-    """Запускает авто-пинг в отдельном потоке"""
+    """Запускает авто-пинг в отдельном потоке (исправленная версия)"""
     def ping_worker():
         time.sleep(30)
         
-        # Просто пингуем localhost, так как мы уже внутри сервера
         ping_count = 0
         while True:
             ping_count += 1
@@ -1373,7 +1371,8 @@ def start_auto_ping():
                 # Пингуем самого себя через localhost
                 response = requests.get(
                     f"http://localhost:{PORT}/health", 
-                    timeout=5
+                    timeout=5,
+                    headers={"User-Agent": "Render-AutoPing/1.0"}
                 )
                 if response.status_code == 200:
                     logger.info(f"⚡ Пинг #{ping_count}: ✅ локальный")
@@ -1388,6 +1387,7 @@ def start_auto_ping():
     thread.start()
     logger.info("✅ Поток авто-пинга создан")
     return thread
+
 # ================== FASTAPI ЭНДПОИНТЫ ==================
 app = FastAPI(title="Family Finance Bot")
 
@@ -1440,7 +1440,7 @@ async def startup_event():
     
     # Запускаем авто-пинг
     start_auto_ping()
-    logger.info("🔧 Авто-пинг запущен")
+    logger.info("🔧 Авто-пинг запущен (интервал 4 минуты)")
     
     # Запускаем бота
     success = await start_bot()
@@ -1483,4 +1483,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
