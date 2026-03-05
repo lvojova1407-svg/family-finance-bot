@@ -1,6 +1,6 @@
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-Версия 6.0 - АРХИВНЫЕ ПЛАТЕЖИ И СТАТИСТИКА
+Версия 6.1 - СТАБИЛЬНЫЙ РЕЛИЗ
 """
 
 import asyncio
@@ -12,10 +12,10 @@ import threading
 import time
 import random
 import calendar
+import signal
 from datetime import datetime, timezone, timedelta, date
 from typing import Optional
 from contextlib import asynccontextmanager
-from dateutil.relativedelta import relativedelta
 
 # Telegram
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
@@ -34,7 +34,20 @@ from fastapi import FastAPI
 import uvicorn
 import requests
 
-from config import BOT_TOKEN, VERSION, PORT, RENDER_URL, LOCAL_EXCEL_PATH
+# ========== ПРИНУДИТЕЛЬНЫЙ СБРОС ВЕБХУКА ПРИ СТАРТЕ ==========
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+if BOT_TOKEN:
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook",
+            json={"drop_pending_updates": True},
+            timeout=5
+        )
+        print("🔥 Вебхук принудительно сброшен")
+    except:
+        print("⚠️ Не удалось сбросить вебхук")
+
+from config import VERSION, PORT, RENDER_URL, LOCAL_EXCEL_PATH
 from yandex_disk import add_expense, add_income, delete_last, download_from_yandex, get_statistics
 
 # Настройка логгирования
@@ -49,6 +62,7 @@ logger = logging.getLogger(__name__)
 bot_app: Optional[Application] = None
 startup_time = datetime.now(timezone.utc)
 ping_thread = None
+shutdown_event = asyncio.Event()
 
 # Состояния для ConversationHandler
 (
@@ -129,7 +143,6 @@ def get_categories_keyboard(show_archive=True):
     """Клавиатура с категориями расходов"""
     keyboard = []
     
-    # Основные категории
     for i in range(0, len(PRIORITY_CATEGORIES), 2):
         row = []
         row.append(InlineKeyboardButton(text=PRIORITY_CATEGORIES[i], callback_data=f"cat_{PRIORITY_CATEGORIES[i]}"))
@@ -137,11 +150,9 @@ def get_categories_keyboard(show_archive=True):
             row.append(InlineKeyboardButton(text=PRIORITY_CATEGORIES[i + 1], callback_data=f"cat_{PRIORITY_CATEGORIES[i + 1]}"))
         keyboard.append(row)
     
-    # Другие категории
     if HIDDEN_CATEGORIES:
         keyboard.append([InlineKeyboardButton(text="📋 Другие категории...", callback_data="show_hidden_categories")])
     
-    # Разделитель и архивная запись
     if show_archive:
         keyboard.append([InlineKeyboardButton(text="┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄", callback_data="ignore")])
         keyboard.append([InlineKeyboardButton(text="📅 Архивная запись", callback_data="archive_expense")])
@@ -220,7 +231,6 @@ def get_calendar_keyboard(year: int, month: int, callback_prefix: str):
     """Генерирует клавиатуру-календарь"""
     keyboard = []
     
-    # Заголовок с месяцами
     prev_month = month - 1 if month > 1 else 12
     prev_year = year if month > 1 else year - 1
     next_month = month + 1 if month < 12 else 1
@@ -233,11 +243,9 @@ def get_calendar_keyboard(year: int, month: int, callback_prefix: str):
     ]
     keyboard.append(header)
     
-    # Дни недели
     week_days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
     keyboard.append([InlineKeyboardButton(day, callback_data="ignore") for day in week_days])
     
-    # Календарная сетка
     cal = calendar.monthcalendar(year, month)
     for week in cal:
         row = []
@@ -249,11 +257,9 @@ def get_calendar_keyboard(year: int, month: int, callback_prefix: str):
                 row.append(InlineKeyboardButton(str(day), callback_data=f"{callback_prefix}_date_{date_str}"))
         keyboard.append(row)
     
-    # Кнопка "Сегодня"
     today = get_current_date_obj()
     keyboard.append([InlineKeyboardButton("📅 Сегодня", callback_data=f"{callback_prefix}_date_{format_date(today)}")])
     
-    # Кнопка назад (с правильным контекстом)
     if callback_prefix in ["stats_start", "stats_end", "stats_month", "stats_year"]:
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_period_type")])
     elif callback_prefix in ["compare1_start", "compare1_end", "compare2_start", "compare2_end"]:
@@ -340,14 +346,26 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /debug"""
     user = update.effective_user
-    logger.info(f"🔍 /debug от {user.id}")
+    
+    try:
+        bot_info = await context.bot.get_me()
+        bot_status = f"✅ @{bot_info.username}"
+    except:
+        bot_status = "❌ Ошибка подключения"
     
     response = (
-        f"🔧 Диагностика v{VERSION}\n\n"
-        f"🤖 Бот: ✅\n"
-        f"🕐 {get_moscow_time()}\n"
-        f"📅 {get_current_date()}\n"
-        f"📊 Режим: Архив + Сравнение"
+        f"🔧 ДИАГНОСТИКА v{VERSION}\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"🤖 Статус: {bot_status}\n"
+        f"🕐 Время: {get_moscow_time()}\n"
+        f"📅 Дата: {get_current_date()}\n"
+        f"👤 Ваш ID: {user.id}\n"
+        f"📊 Режим: Архив + Сравнение\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"💡 Если бот не отвечает:\n"
+        f"• Напишите /start\n"
+        f"• Подождите 10 секунд\n"
+        f"• Попробуйте снова"
     )
     
     await update.message.reply_text(response)
@@ -363,11 +381,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     logger.info(f"🔘 Кнопка: {data} от {user_id}")
     
-    # Игнорируем разделители
     if data == "ignore":
         return ConversationHandler.END
     
-    # ===== ГЛАВНОЕ МЕНЮ =====
     if data == "back_main":
         await query.edit_message_text(
             "Выберите действие:",
@@ -375,7 +391,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
     
-    # ===== РАСХОДЫ =====
     elif data == "expense":
         await query.edit_message_text(
             "📌 <b>Выберите категорию расхода:</b>",
@@ -411,7 +426,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
     
-    # ===== АРХИВНЫЙ РАСХОД =====
     elif data == "archive_expense":
         context.user_data["is_archive"] = True
         await query.edit_message_text(
@@ -446,7 +460,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
     
-    # ===== ДОХОДЫ =====
     elif data == "income":
         await query.edit_message_text(
             "💵 <b>Выберите источник дохода:</b>",
@@ -465,7 +478,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return WAITING_INCOME_AMOUNT
     
-    # ===== АРХИВНЫЙ ДОХОД =====
     elif data == "archive_income":
         context.user_data["is_archive"] = True
         await query.edit_message_text(
@@ -500,7 +512,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
     
-    # ===== ОБЩИЕ ШАГИ ДЛЯ РАСХОДОВ =====
     elif data.startswith("payer_"):
         payer = data[6:]
         context.user_data["payer"] = payer
@@ -546,7 +557,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return WAITING_EXPENSE_AMOUNT
     
-    # ===== МЕНЮ СТАТИСТИКИ =====
     elif data == "stats_menu":
         await query.edit_message_text(
             "📊 <b>Меню статистики:</b>",
@@ -571,7 +581,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
     
-    # ===== СТАТИСТИКА ПО ДАТАМ =====
     elif data == "period_dates":
         context.user_data["stats_type"] = "dates"
         await query.edit_message_text(
@@ -638,7 +647,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
     
-    # ===== СТАТИСТИКА ПО МЕСЯЦУ =====
     elif data == "period_month":
         context.user_data["stats_type"] = "month"
         await query.edit_message_text(
@@ -684,7 +692,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
     
-    # ===== СТАТИСТИКА ПО ГОДУ =====
     elif data == "period_year":
         context.user_data["stats_type"] = "year"
         await query.edit_message_text(
@@ -712,7 +719,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         return ConversationHandler.END
     
-    # ===== СРАВНЕНИЕ ПЕРИОДОВ =====
     elif data == "stats_compare":
         context.user_data["compare_step"] = "period1_start"
         await query.edit_message_text(
@@ -847,7 +853,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
     
-    # ===== СТАНДАРТНЫЕ ПУНКТЫ СТАТИСТИКИ =====
     elif data == "download_excel":
         await query.edit_message_text("⏬ Скачиваю файл...")
         
@@ -897,7 +902,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
     
-    # ===== УДАЛЕНИЕ =====
     elif data == "delete_last":
         await query.edit_message_text(
             "❓ <b>Что удалить?</b>",
@@ -988,8 +992,6 @@ async def handle_archive_expense_amount(update: Update, context: ContextTypes.DE
         context.user_data.clear()
         return ConversationHandler.END
     
-    # Здесь нужно модифицировать add_expense для приема даты
-    # Пока используем стандартную функцию
     result = add_expense(category, amount, payer, method)
     await update.message.reply_text(f"✅ {result} (дата: {archive_date})")
     await update.message.reply_text(
@@ -1089,9 +1091,7 @@ async def handle_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ========== ФУНКЦИИ ДЛЯ СТАТИСТИКИ ==========
 def get_statistics_period(start_date: str, end_date: str) -> str:
-    """
-    Получает статистику за период
-    """
+    """Получает статистику за период"""
     try:
         if not download_from_yandex():
             return "❌ Не удалось скачать файл"
@@ -1110,7 +1110,6 @@ def get_statistics_period(start_date: str, end_date: str) -> str:
         if not start or not end:
             return "❌ Ошибка в формате дат"
         
-        # Считаем расходы
         sheet_name = None
         for name in ["Расходы", "расходы"]:
             if name in wb.sheetnames:
@@ -1136,7 +1135,6 @@ def get_statistics_period(start_date: str, end_date: str) -> str:
                     except:
                         continue
         
-        # Считаем доходы
         income_sheet = None
         for name in ["Доходы", "доходы"]:
             if name in wb.sheetnames:
@@ -1180,16 +1178,13 @@ def get_statistics_period(start_date: str, end_date: str) -> str:
         return f"❌ Ошибка: {str(e)[:100]}"
 
 def compare_periods(start1: str, end1: str, start2: str, end2: str) -> str:
-    """
-    Сравнивает два периода
-    """
+    """Сравнивает два периода"""
     if not all([start1, end1, start2, end2]):
         return "❌ Ошибка: не выбраны все даты"
     
     stats1 = get_statistics_period(start1, end1)
     stats2 = get_statistics_period(start2, end2)
     
-    # Парсим числа из статистики
     def extract_balance(text):
         import re
         match = re.search(r'Баланс: ([\d\s,]+) ₽', text)
@@ -1260,128 +1255,121 @@ async def start_bot():
     
     logger.info("🤖 Инициализация Telegram бота...")
     
-    await asyncio.sleep(5)
-    
-    try:
-        bot_app = Application.builder().token(BOT_TOKEN).build()
-        logger.info("✅ Приложение создано")
-        
-        # Очистка предыдущих сессий
+    for attempt in range(3):
         try:
-            await bot_app.bot.delete_webhook(drop_pending_updates=True)
-            logger.info("✅ Вебхук удален")
-            await asyncio.sleep(2)
+            bot_app = Application.builder().token(BOT_TOKEN).build()
+            logger.info(f"✅ Приложение создано (попытка {attempt + 1})")
+            
+            try:
+                await bot_app.bot.delete_webhook(drop_pending_updates=True)
+                logger.info("✅ Вебхук удален")
+                await asyncio.sleep(2)
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка при очистке: {e}")
+            
+            await setup_bot_commands(bot_app)
+            
+            expense_conv = ConversationHandler(
+                entry_points=[CallbackQueryHandler(button_callback, pattern="^method_")],
+                states={
+                    WAITING_EXPENSE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_amount)]
+                },
+                fallbacks=[CommandHandler("cancel", cancel)],
+                per_message=False
+            )
+            
+            archive_expense_conv = ConversationHandler(
+                entry_points=[CallbackQueryHandler(button_callback, pattern="^method_")],
+                states={
+                    WAITING_ARCHIVE_EXPENSE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_archive_expense_amount)]
+                },
+                fallbacks=[CommandHandler("cancel", cancel)],
+                per_message=False
+            )
+            
+            income_conv = ConversationHandler(
+                entry_points=[CallbackQueryHandler(button_callback, pattern="^source_")],
+                states={
+                    WAITING_INCOME_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_income_amount)]
+                },
+                fallbacks=[CommandHandler("cancel", cancel)],
+                per_message=False
+            )
+            
+            archive_income_conv = ConversationHandler(
+                entry_points=[CallbackQueryHandler(button_callback, pattern="^source_")],
+                states={
+                    WAITING_ARCHIVE_INCOME_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_archive_income_amount)]
+                },
+                fallbacks=[CommandHandler("cancel", cancel)],
+                per_message=False
+            )
+            
+            bot_app.add_handler(CommandHandler("start", start_command))
+            bot_app.add_handler(CommandHandler("help", help_command))
+            bot_app.add_handler(CommandHandler("stats", stats_command))
+            bot_app.add_handler(CommandHandler("ping", ping_command))
+            bot_app.add_handler(CommandHandler("debug", debug_command))
+            bot_app.add_handler(CommandHandler("cancel", cancel))
+            
+            bot_app.add_handler(expense_conv)
+            bot_app.add_handler(archive_expense_conv)
+            bot_app.add_handler(income_conv)
+            bot_app.add_handler(archive_income_conv)
+            
+            bot_app.add_handler(CallbackQueryHandler(button_callback))
+            bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_unknown))
+            
+            logger.info("✅ Все обработчики добавлены")
+            
+            await bot_app.initialize()
+            await bot_app.start()
+            
+            await asyncio.sleep(3)
+            
+            await bot_app.updater.start_polling(
+                poll_interval=0.5,
+                timeout=30,
+                drop_pending_updates=True,
+                allowed_updates=['message', 'callback_query'],
+                bootstrap_retries=5
+            )
+            
+            logger.info("✅ Telegram бот успешно запущен!")
+            return True
+            
         except Exception as e:
-            logger.warning(f"⚠️ Ошибка при очистке: {e}")
-        
-        # Устанавливаем команды меню
-        await setup_bot_commands(bot_app)
-        
-        # ConversationHandler для расходов
-        expense_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(button_callback, pattern="^method_")],
-            states={
-                WAITING_EXPENSE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_amount)]
-            },
-            fallbacks=[CommandHandler("cancel", cancel)],
-            per_message=False
-        )
-        
-        # ConversationHandler для архивных расходов
-        archive_expense_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(button_callback, pattern="^method_")],
-            states={
-                WAITING_ARCHIVE_EXPENSE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_archive_expense_amount)]
-            },
-            fallbacks=[CommandHandler("cancel", cancel)],
-            per_message=False
-        )
-        
-        # ConversationHandler для доходов
-        income_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(button_callback, pattern="^source_")],
-            states={
-                WAITING_INCOME_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_income_amount)]
-            },
-            fallbacks=[CommandHandler("cancel", cancel)],
-            per_message=False
-        )
-        
-        # ConversationHandler для архивных доходов
-        archive_income_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(button_callback, pattern="^source_")],
-            states={
-                WAITING_ARCHIVE_INCOME_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_archive_income_amount)]
-            },
-            fallbacks=[CommandHandler("cancel", cancel)],
-            per_message=False
-        )
-        
-        # Добавляем обработчики команд
-        bot_app.add_handler(CommandHandler("start", start_command))
-        bot_app.add_handler(CommandHandler("help", help_command))
-        bot_app.add_handler(CommandHandler("stats", stats_command))
-        bot_app.add_handler(CommandHandler("ping", ping_command))
-        bot_app.add_handler(CommandHandler("debug", debug_command))
-        bot_app.add_handler(CommandHandler("cancel", cancel))
-        
-        # Добавляем ConversationHandler
-        bot_app.add_handler(expense_conv)
-        bot_app.add_handler(archive_expense_conv)
-        bot_app.add_handler(income_conv)
-        bot_app.add_handler(archive_income_conv)
-        
-        # Добавляем обработчик inline-кнопок
-        bot_app.add_handler(CallbackQueryHandler(button_callback))
-        
-        # Добавляем обработчик неизвестных сообщений
-        bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_unknown))
-        
-        logger.info("✅ Все обработчики добавлены")
-        
-        await bot_app.initialize()
-        await bot_app.start()
-        
-        await asyncio.sleep(3)
-        
-        await bot_app.updater.start_polling(
-            poll_interval=1.0,
-            timeout=20,
-            drop_pending_updates=True,
-            allowed_updates=['message', 'callback_query']
-        )
-        
-        logger.info("✅ Telegram бот успешно запущен!")
-        return True
-        
-    except Exception as e:
-        logger.error(f"💥 Ошибка при запуске бота: {e}")
-        return False
+            logger.error(f"💥 Ошибка при запуске бота (попытка {attempt + 1}): {e}")
+            if attempt < 2:
+                await asyncio.sleep(5)
+            continue
+    
+    return False
 
 # ================== АВТО-ПИНГ ==================
 def start_auto_ping():
-    """Запускает авто-пинг в отдельном потоке (исправленная версия)"""
+    """Запускает авто-пинг в отдельном потоке"""
     def ping_worker():
         time.sleep(30)
-        
         ping_count = 0
-        while True:
+        while not shutdown_event.is_set():
             ping_count += 1
             try:
-                # Пингуем самого себя через localhost
                 response = requests.get(
                     f"http://localhost:{PORT}/health", 
-                    timeout=5,
-                    headers={"User-Agent": "Render-AutoPing/1.0"}
+                    timeout=5
                 )
                 if response.status_code == 200:
-                    logger.info(f"⚡ Пинг #{ping_count}: ✅ локальный")
+                    logger.info(f"⚡ Пинг #{ping_count}: ✅")
                 else:
-                    logger.warning(f"⚡ Пинг #{ping_count}: ⚠️ код {response.status_code}")
+                    logger.warning(f"⚡ Пинг #{ping_count}: ⚠️ {response.status_code}")
             except Exception as e:
                 logger.debug(f"⚡ Пинг #{ping_count}: {e}")
             
-            time.sleep(240)  # 4 минуты
+            for _ in range(240):
+                if shutdown_event.is_set():
+                    break
+                time.sleep(1)
     
     thread = threading.Thread(target=ping_worker, daemon=True)
     thread.start()
@@ -1399,7 +1387,7 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "bot_running": bool(bot_app),
+        "bot_running": bool(bot_app and bot_app.running),
         "time_moscow": get_moscow_time(),
         "version": VERSION
     }
@@ -1415,6 +1403,7 @@ async def status():
         },
         "bot": {
             "initialized": bool(bot_app),
+            "running": bool(bot_app and bot_app.running) if bot_app else False,
             "version": VERSION,
             "features": ["archive", "period_stats", "compare_periods"]
         }
@@ -1427,22 +1416,19 @@ async def startup_event():
     logger.info(f"🚀 ЗАПУСК ФИНАНСОВОГО БОТА v{VERSION}")
     logger.info("=" * 60)
     
-    logger.info(f"✅ Токен бота: Найден")
+    logger.info(f"✅ Токен бота: {'Найден' if BOT_TOKEN else 'ОТСУТСТВУЕТ!'}")
     logger.info(f"⏰ Время по Москве: {get_moscow_time()}")
     logger.info(f"📅 Дата: {get_current_date()}")
     logger.info(f"🌐 Порт: {PORT}")
     
-    import socket
-    hostname = socket.gethostname()
-    logger.info(f"🖥️ Hostname: {hostname}")
-    
     logger.info("=" * 60)
     
-    # Запускаем авто-пинг
-    start_auto_ping()
-    logger.info("🔧 Авто-пинг запущен (интервал 4 минуты)")
+    global shutdown_event
+    shutdown_event.clear()
     
-    # Запускаем бота
+    start_auto_ping()
+    logger.info("🔧 Авто-пинг запущен")
+    
     success = await start_bot()
     
     if success:
@@ -1452,9 +1438,12 @@ async def startup_event():
         logger.error("💥 Не удалось запустить бота!")
 
 @app.on_event("shutdown")
-async def shutdown_event():
+async def shutdown_event_handler():
     """Остановка при завершении"""
     logger.info("🛑 Завершение работы...")
+    
+    global shutdown_event
+    shutdown_event.set()
     
     if bot_app:
         try:
