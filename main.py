@@ -1,3 +1,17 @@
+
+# ========== ПРИНУДИТЕЛЬНЫЙ СБРОС ВЕБХУКА ПРИ СТАРТЕ ==========
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+if BOT_TOKEN:
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook",
+            json={"drop_pending_updates": True},
+            timeout=5
+        )
+        print("🔥 Вебхук принудительно сброшен")
+    except Exception as e:
+        print(f"⚠️ Не удалось сбросить вебхук: {e}")
+        
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
 Версия 6.1 - СТАБИЛЬНЫЙ РЕЛИЗ
@@ -1346,27 +1360,49 @@ async def start_bot():
     
     return False
 
-# ================== АВТО-ПИНГ ==================
 def start_auto_ping():
     """Запускает авто-пинг в отдельном потоке"""
     def ping_worker():
         time.sleep(30)
+        
+        # ✅ ПРАВИЛЬНО: используем реальный URL или localhost как fallback
+        # Сначала пробуем получить реальный URL из переменных окружения
+        import socket
+        hostname = socket.gethostname()
+        
+        possible_urls = [
+            os.getenv("RENDER_URL", "").rstrip('/'),
+            f"https://{hostname}.onrender.com",
+            f"http://localhost:{PORT}"  # запасной вариант
+        ]
+        
+        # Убираем пустые URL
+        possible_urls = [url for url in possible_urls if url]
+        
+        logger.info(f"🧵 Авто-пинг запущен, пробуем URL: {possible_urls}")
+        
         ping_count = 0
         while not shutdown_event.is_set():
             ping_count += 1
-            try:
-                response = requests.get(
-                    f"http://localhost:{PORT}/health", 
-                    timeout=5
-                )
-                if response.status_code == 200:
-                    logger.info(f"⚡ Пинг #{ping_count}: ✅")
-                else:
-                    logger.warning(f"⚡ Пинг #{ping_count}: ⚠️ {response.status_code}")
-            except Exception as e:
-                logger.debug(f"⚡ Пинг #{ping_count}: {e}")
             
-            for _ in range(240):
+            for url in possible_urls:
+                try:
+                    response = requests.get(
+                        f"{url}/health", 
+                        timeout=15,
+                        headers={"User-Agent": "Render-AutoPing/1.0"}
+                    )
+                    if response.status_code == 200:
+                        logger.info(f"✅ Авто-пинг #{ping_count} успешен для {url}")
+                        break
+                except Exception as e:
+                    logger.debug(f"Пинг #{ping_count} для {url} не удался: {e}")
+                    continue
+            else:
+                logger.warning(f"⚠️ Авто-пинг #{ping_count}: все URL недоступны")
+            
+            # Пинг каждые 5 минут (300 секунд) как в эталоне
+            for _ in range(300):
                 if shutdown_event.is_set():
                     break
                 time.sleep(1)
@@ -1472,3 +1508,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
