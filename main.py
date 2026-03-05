@@ -1,32 +1,19 @@
-
-# ========== ПРИНУДИТЕЛЬНЫЙ СБРОС ВЕБХУКА ПРИ СТАРТЕ ==========
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-if BOT_TOKEN:
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook",
-            json={"drop_pending_updates": True},
-            timeout=5
-        )
-        print("🔥 Вебхук принудительно сброшен")
-    except Exception as e:
-        print(f"⚠️ Не удалось сбросить вебхук: {e}")
-        
 """
 ОСНОВНОЙ МОДУЛЬ TELEGRAM-БОТА
-Версия 6.1 - СТАБИЛЬНЫЙ РЕЛИЗ
+Версия 6.1 - СТАБИЛЬНЫЙ РЕЛИЗ (С АКТИВНЫМ ПИНГОМ)
 """
 
+import os
+import sys
 import asyncio
 import logging
 import re
-import os
-import sys
 import threading
 import time
 import random
 import calendar
 import signal
+import socket
 from datetime import datetime, timezone, timedelta, date
 from typing import Optional
 from contextlib import asynccontextmanager
@@ -58,8 +45,8 @@ if BOT_TOKEN:
             timeout=5
         )
         print("🔥 Вебхук принудительно сброшен")
-    except:
-        print("⚠️ Не удалось сбросить вебхук")
+    except Exception as e:
+        print(f"⚠️ Не удалось сбросить вебхук: {e}")
 
 from config import VERSION, PORT, RENDER_URL, LOCAL_EXCEL_PATH
 from yandex_disk import add_expense, add_income, delete_last, download_from_yandex, get_statistics
@@ -1360,23 +1347,31 @@ async def start_bot():
     
     return False
 
+# ================== АВТО-ПИНГ (ИСПРАВЛЕННАЯ ВЕРСИЯ) ==================
 def start_auto_ping():
-    """Запускает авто-пинг в отдельном потоке"""
+    """Запускает авто-пинг в отдельном потоке (как в проекте А)"""
     def ping_worker():
         time.sleep(30)
         
-        # ✅ ПРАВИЛЬНО: используем реальный URL или localhost как fallback
-        # Сначала пробуем получить реальный URL из переменных окружения
-        import socket
-        hostname = socket.gethostname()
+        # Собираем возможные URL для пинга
+        possible_urls = []
         
-        possible_urls = [
-            os.getenv("RENDER_URL", "").rstrip('/'),
-            f"https://{hostname}.onrender.com",
-            f"http://localhost:{PORT}"  # запасной вариант
-        ]
+        # Добавляем RENDER_URL из переменных окружения
+        render_url = os.getenv("RENDER_URL", "").rstrip('/')
+        if render_url:
+            possible_urls.append(render_url)
         
-        # Убираем пустые URL
+        # Пробуем сгенерировать URL на основе hostname
+        try:
+            hostname = socket.gethostname()
+            possible_urls.append(f"https://{hostname}.onrender.com")
+        except:
+            pass
+        
+        # Добавляем localhost как запасной вариант
+        possible_urls.append(f"http://localhost:{PORT}")
+        
+        # Убираем пустые
         possible_urls = [url for url in possible_urls if url]
         
         logger.info(f"🧵 Авто-пинг запущен, пробуем URL: {possible_urls}")
@@ -1401,7 +1396,7 @@ def start_auto_ping():
             else:
                 logger.warning(f"⚠️ Авто-пинг #{ping_count}: все URL недоступны")
             
-            # Пинг каждые 5 минут (300 секунд) как в эталоне
+            # Пинг каждые 5 минут (300 секунд)
             for _ in range(300):
                 if shutdown_event.is_set():
                     break
@@ -1462,6 +1457,7 @@ async def startup_event():
     global shutdown_event
     shutdown_event.clear()
     
+    # Запускаем исправленный авто-пинг
     start_auto_ping()
     logger.info("🔧 Авто-пинг запущен")
     
@@ -1508,4 +1504,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
