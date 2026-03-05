@@ -11,8 +11,6 @@ services:
         sync: false
       - key: PUBLIC_KEY
         sync: false
-      - key: RENDER_URL
-        value: https://family-finance-bot.onrender.com
       - key: PORT
         value: 10000
     healthCheckPath: /health
