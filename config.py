@@ -18,3 +18,8 @@ VERSION = "5.2"
 # ========== ДЛЯ ВЕБ-СЕРВЕРА И ПИНГА ==========
 PORT = int(os.getenv("PORT", 10000))
 RENDER_URL = os.getenv("RENDER_URL", "https://family-finance-bot.onrender.com")
+
+# ========== ДЛЯ ВЕБ-СЕРВЕРА И ПИНГА ==========
+PORT = int(os.getenv("PORT", 10000))
+# НЕ задаем конкретный URL, пусть определяется автоматически
+RENDER_URL = os.getenv("RENDER_URL", "")
