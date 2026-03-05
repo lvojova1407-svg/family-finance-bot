@@ -1,5 +1,6 @@
 """
 КОНФИГУРАЦИЯ БОТА
+Версия 6.0
 """
 
 import os
@@ -13,13 +14,8 @@ PUBLIC_KEY = os.getenv("PUBLIC_KEY", "")
 
 # ========== НАСТРОЙКИ ==========
 LOCAL_EXCEL_PATH = "budget.xlsx"
-VERSION = "5.2"
+VERSION = "6.0"
 
 # ========== ДЛЯ ВЕБ-СЕРВЕРА И ПИНГА ==========
 PORT = int(os.getenv("PORT", 10000))
-RENDER_URL = os.getenv("RENDER_URL", "https://family-finance-bot.onrender.com")
-
-# ========== ДЛЯ ВЕБ-СЕРВЕРА И ПИНГА ==========
-PORT = int(os.getenv("PORT", 10000))
-# НЕ задаем конкретный URL, пусть определяется автоматически
 RENDER_URL = os.getenv("RENDER_URL", "")
