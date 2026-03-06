@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: family-finance-bot-v2  # ИЗМЕНЕНО ИМЯ!
+    name: family-finance-bot-v2
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py
@@ -13,5 +13,7 @@ services:
         sync: false
       - key: PORT
         value: 10000
+      - key: RENDER_URL
+        value: https://family-finance-bot-c2b7.onrender.com  # ВАШ РЕАЛЬНЫЙ URL!
     healthCheckPath: /health
     autoDeploy: true
