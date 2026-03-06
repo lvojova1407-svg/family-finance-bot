@@ -1,6 +1,6 @@
 """
 КОНФИГУРАЦИЯ БОТА
-Версия 6.1
+Версия 6.2
 """
 
 import os
@@ -14,8 +14,8 @@ PUBLIC_KEY = os.getenv("PUBLIC_KEY", "")
 
 # ========== НАСТРОЙКИ ==========
 LOCAL_EXCEL_PATH = "budget.xlsx"
-VERSION = "6.1"
+VERSION = "6.2"
 
 # ========== ДЛЯ ВЕБ-СЕРВЕРА И ПИНГА ==========
 PORT = int(os.getenv("PORT", 10000))
-RENDER_URL = os.getenv("RENDER_URL", "")
+RENDER_URL = os.getenv("RENDER_URL", "")  # Ваш URL на Render
